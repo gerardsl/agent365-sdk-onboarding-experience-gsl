@@ -1,120 +1,13 @@
 # Agent 365 SDK Onboarding Experience
 
-## What you can ask for
-
-Each stage has a phrase. You do not need to know skill names.
-
-| Say this | What happens |
-|---|---|
-| *Onboard this agent to Agent 365.* | Detects your stack and guides blueprint, identity and permission setup; review grants and administrator handoffs before applying them |
-| *Add observability to this agent.* (highly recommended) | OpenTelemetry instrumentation and the Agent 365 exporter |
-| *Add DLP to this agent.* (highly recommended) | Adds Purview prompt/response evaluation; configure a real blocking policy and verify enforcement separately |
-| *Add Work IQ tools to this agent.* (highly recommended) | Microsoft 365 data: mail, calendar, Teams, SharePoint, OneDrive |
-| *Add an MCP server.* (optional) | Any external MCP server: filesystem, git, GitHub, Postgres, Slack, Playwright |
-| *Add lab tools.* (optional) | Local utilities: web fetch, encoders, hashing, text transforms |
-| *Make this agent chattable in Teams.* (optional) | HTTP host, dev tunnel, and endpoint registration |
-| *Onboard this Java agent.* (optional) | Hosting layer and telemetry for Java, which has no Microsoft SDK |
-| *Let me test this agent locally.* (optional) | An explicit loopback-only dev channel where supported; still needs locally usable model access. It does not disable the authenticated Python host |
-| *Update the Agent 365 kit.* (optional) | Updates kit-owned paths in the prepared workspace; does not update the whole bundle or sample dependencies |
-
-The [standalone sample demos](#example-agents) need neither a dev channel nor a tunnel. The Python host's unsigned-request **401** is expected; a compatible explicit development adapter is required for local chat, not an authentication bypass.
-
-### Example
-
-A TypeScript agent using the OpenAI Agents SDK, with no Agent 365 anything:
-
-```
-> Onboard this agent to Agent 365.
-
-  Stack:      OpenAI Agents SDK
-  Language:   NodeJS
-  Agent type: Agent (Non AI Teammate)
-  Blueprint:  none found - will create new
-
-  Which capabilities should I configure?
-    1. Register        2. Observability
-    3. Work IQ         4. AI Teammate
-
-> 1 and 2
-
-  How will your agent authenticate when calling downstream APIs?
-    1. On-behalf-of (OBO)    2. Service-to-service (S2S)
-
-> 1
-```
-
-From there, review the `a365 setup all --dry-run` preview and actual proposed grants. Approve tenant creation/consent only after the intended operator, scopes and target tenant have been checked.
-
-## Repository overview
-
-**Agent 365 SDK Onboarding Experience** (`agent365-sdk-onboarding-experience`) provides runnable agent examples and guided Agent 365 onboarding in one repository.
-
-> Read [Implementation and revision notes](docs/LOCAL-REVISION.md) for provenance and integration boundaries.
-> For the extended, offline-tested .NET local workflow, prepare
-> `dotnet-agent365-lab`; all seven choices are listed below.
-> This is a reproducible local revision of the verified release snapshot, not an
-> official maintainer release. It contains no operator credentials or tenant-specific identities.
-
-There are now **seven examples across six languages**: C# (basic and extended),
-JavaScript/Node.js, Python, Java, Go, and Rust. See
-[the complete example catalog](docs/AGENT-EXAMPLES.md) for commands and support boundaries.
-
-```powershell
-node .\tools\prepare-workspace.mjs --example dotnet-agent365-lab --destination ..\my-agent-lab
-```
-
-**Start here.** This GitHub repository contains the **unpacked onboarding bundle**: onboarding skills, seven example agents across six languages, a workspace-preparation helper, and all authored instructions. Clone or download this repository; there is no separate bundle ZIP to find or extract inside it. This root **README.md is the authoritative user guide**; the other documents are supporting references.
-
-**This repository includes 14 skills: seven upstream skills and seven kit add-ons.** Internal bundle and kit versions are recorded in `BUNDLE-MANIFEST.json` for provenance; they are not the repository name. You do not need the separate maintainer source package or a historical kit release. Obtain this repository in its **own directory**, choose **one** example, and prepare a **new, independent agent workspace outside that directory**. Never onboard the repository root or `kit\` directly.
-
-This repository is the developer onboarding kit, **not the agent package uploaded to Microsoft 365**. After configuring your agent in its own workspace, follow the publishing steps to generate and upload that agent's package.
-
-## Before you start — information and access checklist
-
-Gather the items below **before starting onboarding**. Items marked conditional are only needed for the capabilities you choose. The bundle does not supply a model, a tenant, licences, administrator rights, or hosting. You can try the deterministic offline demos without tenant access; they are not onboarding or live AI inference.
-
-### Needed for every onboarding
-
-| Information or access | What to have ready |
-|---|---|
-| **Agent project** | The source-directory path, programming language/framework, dependency file, and the command that starts your agent. Choose one bundled example, or bring an existing project into a separate workspace. Decide whether to modify an existing agent or scaffold a new one; do not use the multi-example bundle as the agent project. |
-| **Tenant and sign-in account** | Your Microsoft Entra tenant ID, tenant domain, and work/school account UPN. Confirm you are signing into the intended tenant, not a personal account or a different directory. |
-| **Tenant readiness and administrator contact** | Confirmation that Agent 365 is available for your tenant and that the required licences/features and policies are enabled. Identify the administrator who will perform bootstrap, consent, and publishing actions you cannot perform yourself. |
-| **Agent 365 CLI client selection** | Confirm whether the Microsoft-managed CLI enterprise application is available in your tenant. Current documentation prefers it; otherwise collect the approved tenant-owned client application's ID, owner, and consent status. The interactive CLI client does **not** require you to supply a client secret. This client ID is not the agent's blueprint ID or runtime identity. |
-| **Agent details and ownership** | Display name and description, owner(s), and at least one accountable sponsor for the blueprint/identity; have their Entra object IDs or resolvable UPNs ready. Decide whether to reuse an existing blueprint; if so, collect its IDs and ownership/access information. Sponsorship alone does not grant administration rights. |
-| **Capabilities and identity mode** | Registration only, observability, Work IQ, Teams/Copilot reachability, and/or DLP. Choose non-Teammate **OBO** or **S2S**, or an **AI Teammate** with its agentic-user identity. This kit's Work IQ flow requires a delegated user token and is not wired for S2S. |
-| **Model configuration** | The provider and model name; its API key **or** configured workload identity. For Azure-hosted models, also collect the endpoint, deployment name, and API version if your framework requires one. Confirm that the identity/key can actually invoke that model and has quota. |
-| **Local tools and access** | The tools in [Prerequisites](#prerequisites), a usable AI coding CLI account/subscription, write access to the agent folder, and network access to GitHub, package registries, Microsoft sign-in/service endpoints, and your model provider. Use an interactive, non-elevated terminal on Windows. |
-
-### Additional information for optional capabilities
-
-| Capability | Additional information/access to prepare |
-|---|---|
-| **Work IQ** | The exact MCP servers/capabilities you want from the `a365` catalog, their audience IDs/scopes, the acting principal's Microsoft 365 Copilot entitlement, and the mailboxes/sites/teams/files that principal can access. A tool grant does not grant access to every resource; agent-user files may need explicit sharing and sensitivity-label usage rights. |
-| **External MCP servers** | Approved server URLs or local executable commands and arguments, transport type, required credentials, and the external service's own permissions. These are separate from Agent 365/Work IQ consent. |
-| **Local lab tools** | The tool groups you want enabled and any network/egress restrictions for web-fetch tools. |
-| **Teams/Copilot messaging** | A public HTTPS messaging endpoint, or a dev-tunnel sign-in account and an available local host port (default `3978`). Keep `/api/messages` authenticated even when the tunnel permits anonymous transport access. |
-| **Azure hosting, model access, or billing** | Subscription ID, resource group, region, resource names, deployment/billing owner, and the runtime identity's model/data access where applicable. Azure hosting is optional; an Azure model or Purview pay-as-you-go integration can need a subscription even when hosting is elsewhere. |
-| **Publishing** | Agent/package name and description, publisher information, website/privacy/terms URLs and valid icons where required by the manifest. Identify the Microsoft 365/Teams administrator who can upload, approve, and make the app available to your test users. |
-| **AI Teammate instance** | Instance name, agent-user alias/UPN domain and usage location, owner/sponsor details, Frontier availability/capacity, and the applicable user/mailbox/service licences. The agent user is associated with an agent identity; it does not replace that identity. |
-| **Observability entitlement** | Confirm at least one user has Microsoft Agent 365 or Microsoft 365 E7 **assigned** in the tenant. Merely purchasing an unassigned subscription is insufficient for the documented observability path. |
-| **Purview DLP** | Policy and billing owners, supported licences/PAYG, targeted users and application, sensitive-information types, and expected blocking behavior. Record the Entra application ID actually targeted by the policy as `PURVIEW_APP_LOCATION_ID`; do not invent a GUID or assume it is the token's user/object ID. |
-| **Local development channel** | A free loopback port and a locally usable model configuration. Keep `A365_DEV_CHANNEL` off in saved configuration; enable it only for an intentional local test session. |
-
-**Generated later — do not invent these values:** an optional new custom CLI client ID, blueprint IDs/credentials, agent-identity application and service-principal object IDs, agent-user object ID, consent/role-assignment records, tooling/package manifests, and the actual tunnel URL. Save them from CLI/portal output and `a365.generated.config.json`; application IDs and object IDs are not interchangeable. In particular, Graph's `oauth2PermissionGrants.clientId` is a **service-principal object ID**, not an application/client ID.
-
-**Keep secrets out of this checklist and out of Git.** Put model keys, client secrets, and external-service tokens in the local environment or an approved secret store. Do not paste real credentials into the README, an issue, or a support transcript.
-
----
-
 ## Contents
 
+- [Quick start — choose one workspace](#quick-start)
 - [What you can ask for](#what-you-can-ask-for)
 - [Repository overview](#repository-overview)
 - [Information and access checklist](#before-you-start--information-and-access-checklist)
-- [Quick start — choose one workspace](#quick-start)
-- [Example agents and exact commands](#example-agents)
 - [Prerequisites and SDKs](#prerequisites)
+- [Example agents and exact commands](#example-agents)
 - [Onboarding steps and required permissions](#onboarding-steps-and-required-permissions)
 - [maven-prod observability consent recovery](#maven-prod-observability-consent-recovery)
 - [Capability boundaries and tenant verification](#capability-boundaries-and-tenant-verification)
@@ -215,6 +108,115 @@ node .\tools\prepare-workspace.mjs --example blank --destination ..\my-existing-
 Then copy/merge your existing project into that new workspace, or ask the skills to scaffold there. Reconcile overlapping `.claude`, `.agents`, `.github`, and configuration files carefully; preserve your project's settings, instructions, own skills, and `.env`. Do not combine multiple examples in one agent workspace. Enter the new workspace before running the launcher.
 
 If you must install directly into an existing project, back it up and follow the established **kit-only** installation/configuration-preservation guidance in this repository's `kit\AGENT365-KIT-README.md` (`dist\AGENT365-KIT-README.md` in the separate maintainer checkout) and [`docs/USING-WITH-YOUR-CLI.md`](docs/USING-WITH-YOUR-CLI.md). Their historical kit-only download/extraction instructions do not mean you should copy this entire repository into your agent. **The helper never merges into an existing directory.**
+
+---
+
+## What you can ask for
+
+Each stage has a phrase. You do not need to know skill names.
+
+| Say this | What happens |
+|---|---|
+| *Onboard this agent to Agent 365.* | Detects your stack and guides blueprint, identity and permission setup; review grants and administrator handoffs before applying them |
+| *Add observability to this agent.* (highly recommended) | OpenTelemetry instrumentation and the Agent 365 exporter |
+| *Add DLP to this agent.* (highly recommended) | Adds Purview prompt/response evaluation; configure a real blocking policy and verify enforcement separately |
+| *Add Work IQ tools to this agent.* (highly recommended) | Microsoft 365 data: mail, calendar, Teams, SharePoint, OneDrive |
+| *Add an MCP server.* (optional) | Any external MCP server: filesystem, git, GitHub, Postgres, Slack, Playwright |
+| *Add lab tools.* (optional) | Local utilities: web fetch, encoders, hashing, text transforms |
+| *Make this agent chattable in Teams.* (optional) | HTTP host, dev tunnel, and endpoint registration |
+| *Onboard this Java agent.* (optional) | Hosting layer and telemetry for Java, which has no Microsoft SDK |
+| *Let me test this agent locally.* (optional) | An explicit loopback-only dev channel where supported; still needs locally usable model access. It does not disable the authenticated Python host |
+| *Update the Agent 365 kit.* (optional) | Updates kit-owned paths in the prepared workspace; does not update the whole bundle or sample dependencies |
+
+The [standalone sample demos](#example-agents) need neither a dev channel nor a tunnel. The Python host's unsigned-request **401** is expected; a compatible explicit development adapter is required for local chat, not an authentication bypass.
+
+### Example
+
+A TypeScript agent using the OpenAI Agents SDK, with no Agent 365 anything:
+
+```
+> Onboard this agent to Agent 365.
+
+  Stack:      OpenAI Agents SDK
+  Language:   NodeJS
+  Agent type: Agent (Non AI Teammate)
+  Blueprint:  none found - will create new
+
+  Which capabilities should I configure?
+    1. Register        2. Observability
+    3. Work IQ         4. AI Teammate
+
+> 1 and 2
+
+  How will your agent authenticate when calling downstream APIs?
+    1. On-behalf-of (OBO)    2. Service-to-service (S2S)
+
+> 1
+```
+
+From there, review the `a365 setup all --dry-run` preview and actual proposed grants. Approve tenant creation/consent only after the intended operator, scopes and target tenant have been checked.
+
+## Repository overview
+
+**Agent 365 SDK Onboarding Experience** (`agent365-sdk-onboarding-experience`) provides runnable agent examples and guided Agent 365 onboarding in one repository.
+
+> Read [Implementation and revision notes](docs/LOCAL-REVISION.md) for provenance and integration boundaries.
+> For the extended, offline-tested .NET local workflow, prepare
+> `dotnet-agent365-lab`; all seven choices are listed in [Quick start](#quick-start).
+> This is a reproducible local revision of the verified release snapshot, not an
+> official maintainer release. It contains no operator credentials or tenant-specific identities.
+
+There are now **seven examples across six languages**: C# (basic and extended),
+JavaScript/Node.js, Python, Java, Go, and Rust. See
+[the complete example catalog](docs/AGENT-EXAMPLES.md) for commands and support boundaries.
+
+```powershell
+node .\tools\prepare-workspace.mjs --example dotnet-agent365-lab --destination ..\my-agent-lab
+```
+
+**Start here.** This GitHub repository contains the **unpacked onboarding bundle**: onboarding skills, seven example agents across six languages, a workspace-preparation helper, and all authored instructions. Clone or download this repository; there is no separate bundle ZIP to find or extract inside it. This root **README.md is the authoritative user guide**; the other documents are supporting references.
+
+**This repository includes 14 skills: seven upstream skills and seven kit add-ons.** Internal bundle and kit versions are recorded in `BUNDLE-MANIFEST.json` for provenance; they are not the repository name. You do not need the separate maintainer source package or a historical kit release. Obtain this repository in its **own directory**, choose **one** example, and prepare a **new, independent agent workspace outside that directory**. Never onboard the repository root or `kit\` directly.
+
+This repository is the developer onboarding kit, **not the agent package uploaded to Microsoft 365**. After configuring your agent in its own workspace, follow the publishing steps to generate and upload that agent's package.
+
+## Before you start — information and access checklist
+
+Gather the items below **before starting onboarding**. Items marked conditional are only needed for the capabilities you choose. The bundle does not supply a model, a tenant, licences, administrator rights, or hosting. You can try the deterministic offline demos without tenant access; they are not onboarding or live AI inference.
+
+### Needed for every onboarding
+
+| Information or access | What to have ready |
+|---|---|
+| **Agent project** | The source-directory path, programming language/framework, dependency file, and the command that starts your agent. Choose one bundled example, or bring an existing project into a separate workspace. Decide whether to modify an existing agent or scaffold a new one; do not use the multi-example bundle as the agent project. |
+| **Tenant and sign-in account** | Your Microsoft Entra tenant ID, tenant domain, and work/school account UPN. Confirm you are signing into the intended tenant, not a personal account or a different directory. |
+| **Tenant readiness and administrator contact** | Confirmation that Agent 365 is available for your tenant and that the required licences/features and policies are enabled. Identify the administrator who will perform bootstrap, consent, and publishing actions you cannot perform yourself. |
+| **Agent 365 CLI client selection** | Confirm whether the Microsoft-managed CLI enterprise application is available in your tenant. Current documentation prefers it; otherwise collect the approved tenant-owned client application's ID, owner, and consent status. The interactive CLI client does **not** require you to supply a client secret. This client ID is not the agent's blueprint ID or runtime identity. |
+| **Agent details and ownership** | Display name and description, owner(s), and at least one accountable sponsor for the blueprint/identity; have their Entra object IDs or resolvable UPNs ready. Decide whether to reuse an existing blueprint; if so, collect its IDs and ownership/access information. Sponsorship alone does not grant administration rights. |
+| **Capabilities and identity mode** | Registration only, observability, Work IQ, Teams/Copilot reachability, and/or DLP. Choose non-Teammate **OBO** or **S2S**, or an **AI Teammate** with its agentic-user identity. This kit's Work IQ flow requires a delegated user token and is not wired for S2S. |
+| **Model configuration** | The provider and model name; its API key **or** configured workload identity. For Azure-hosted models, also collect the endpoint, deployment name, and API version if your framework requires one. Confirm that the identity/key can actually invoke that model and has quota. |
+| **Local tools and access** | The tools in [Prerequisites](#prerequisites), a usable AI coding CLI account/subscription, write access to the agent folder, and network access to GitHub, package registries, Microsoft sign-in/service endpoints, and your model provider. Use an interactive, non-elevated terminal on Windows. |
+
+### Additional information for optional capabilities
+
+| Capability | Additional information/access to prepare |
+|---|---|
+| **Work IQ** | The exact MCP servers/capabilities you want from the `a365` catalog, their audience IDs/scopes, the acting principal's Microsoft 365 Copilot entitlement, and the mailboxes/sites/teams/files that principal can access. A tool grant does not grant access to every resource; agent-user files may need explicit sharing and sensitivity-label usage rights. |
+| **External MCP servers** | Approved server URLs or local executable commands and arguments, transport type, required credentials, and the external service's own permissions. These are separate from Agent 365/Work IQ consent. |
+| **Local lab tools** | The tool groups you want enabled and any network/egress restrictions for web-fetch tools. |
+| **Teams/Copilot messaging** | A public HTTPS messaging endpoint, or a dev-tunnel sign-in account and an available local host port (default `3978`). Keep `/api/messages` authenticated even when the tunnel permits anonymous transport access. |
+| **Azure hosting, model access, or billing** | Subscription ID, resource group, region, resource names, deployment/billing owner, and the runtime identity's model/data access where applicable. Azure hosting is optional; an Azure model or Purview pay-as-you-go integration can need a subscription even when hosting is elsewhere. |
+| **Publishing** | Agent/package name and description, publisher information, website/privacy/terms URLs and valid icons where required by the manifest. Identify the Microsoft 365/Teams administrator who can upload, approve, and make the app available to your test users. |
+| **AI Teammate instance** | Instance name, agent-user alias/UPN domain and usage location, owner/sponsor details, Frontier availability/capacity, and the applicable user/mailbox/service licences. The agent user is associated with an agent identity; it does not replace that identity. |
+| **Observability entitlement** | Confirm at least one user has Microsoft Agent 365 or Microsoft 365 E7 **assigned** in the tenant. Merely purchasing an unassigned subscription is insufficient for the documented observability path. |
+| **Purview DLP** | Policy and billing owners, supported licences/PAYG, targeted users and application, sensitive-information types, and expected blocking behavior. Record the Entra application ID actually targeted by the policy as `PURVIEW_APP_LOCATION_ID`; do not invent a GUID or assume it is the token's user/object ID. |
+| **Local development channel** | A free loopback port and a locally usable model configuration. Keep `A365_DEV_CHANNEL` off in saved configuration; enable it only for an intentional local test session. |
+
+**Generated later — do not invent these values:** an optional new custom CLI client ID, blueprint IDs/credentials, agent-identity application and service-principal object IDs, agent-user object ID, consent/role-assignment records, tooling/package manifests, and the actual tunnel URL. Save them from CLI/portal output and `a365.generated.config.json`; application IDs and object IDs are not interchangeable. In particular, Graph's `oauth2PermissionGrants.clientId` is a **service-principal object ID**, not an application/client ID.
+
+**Keep secrets out of this checklist and out of Git.** Put model keys, client secrets, and external-service tokens in the local environment or an approved secret store. Do not paste real credentials into the README, an issue, or a support transcript.
+
+---
 
 ## Prerequisites
 
