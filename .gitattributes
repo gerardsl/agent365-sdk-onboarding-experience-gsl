@@ -1,0 +1,2 @@
+# Preserve exact bundle bytes so Git checkout does not invalidate manifest hashes.
+* -text

@@ -1,0 +1,30 @@
+{
+  "kitVersion": "0.1.5-local.20260922",
+  "upstreamRepo": "microsoft/agent365-skills",
+  "upstreamVersion": "1.0.2",
+  "upstreamCommit": "99a3ceb",
+  "builtUtc": "2026-09-22T00:00:00Z",
+  "updateSource": "https://github.com/AkramMSFT/agent365-onboarding-kit/releases/latest/download/agent365-onboarding-kit-latest.zip",
+  "skills": [
+    "a365-code-validator",
+    "a365-setup",
+    "add-workiq-tools",
+    "instrument-observability",
+    "make-a365-agent",
+    "make-ai-teammate",
+    "test-local"
+  ],
+  "addons": [
+    "a365-kit",
+    "add-java-agent",
+    "add-lab-tools",
+    "add-mcp-server",
+    "add-messaging-endpoint",
+    "add-purview-dlp",
+    "test-local-channel"
+  ],
+  "localRevision": {
+    "provenance": "Local revision of the verified v0.2.0 release snapshot; not an official maintainer release.",
+    "baseArchiveSha256": "7e37426889aab4584227268f50f1e847d3ba0f63c81b2df85cf737e835a7d143"
+  }
+}
