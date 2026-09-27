@@ -20,7 +20,7 @@ model: sonnet
 
 # Test an agent through a local dev channel
 
-> **Local revision:** Read `.a365-kit/shared/local-runtime-lessons.md` first.
+> **Kit runtime corrections:** Read `.a365-kit/shared/local-runtime-lessons.md` first.
 > A dev channel remains separate from JWT-protected `/api/messages`. An offline
 > result or healthy listener does not prove authenticated Teams replies, tool
 > permissions, delivery receipts, or Purview policy enforcement.

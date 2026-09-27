@@ -3,7 +3,8 @@ name: make-ai-teammate
 description: >
   Transforms a non-M365 agent into a Microsoft Agent 365 AI Teammate. Supports all major
   frameworks across .NET (AgentFramework, Semantic Kernel), Node.js (LangChain, OpenAI Agents
-  SDK, Claude SDK, Semantic Kernel, Google ADK), and Python (AgentFramework on the pinned Agents 1.6 profile). Adds the hosting layer (Express/CloudAdapter for Node.js,
+  SDK, Claude SDK, Semantic Kernel, Google ADK), and Python (AgentFramework, LangChain, OpenAI,
+  Claude, Semantic Kernel, Google ADK). Adds the hosting layer (Express/CloudAdapter for Node.js,
   ASP.NET Core for .NET, aiohttp for Python), AgentApplication class with message routing and
   typing indicators, email notifications, and all required packages and env vars. Wraps existing
   LLM code — does not replace it. Requires a365-setup to have been run first.
@@ -80,9 +81,9 @@ hooks:
 
 # Make AI Teammate
 
-> **maven-prod observability consent:** Run setup through `node .a365-kit/run-a365.mjs setup ...` with the same approved arguments. If the CLI says the blueprint needs `maven-prod [Agent365.Observability.OtelWrite]` consent, follow `.a365-kit/shared/observability-access-package.md`: create the access package (Resource=maven-prod, Type=OAuthApplication, Sub Type=API, Role=Agent365.Observability.OtelWrite), create an initial policy, assign the package to that blueprint, and wait for the assignment status **Delivered** before resuming. A policy creation, approval or CLI exit 0 is not completed consent.
+> **maven-prod observability consent:** Running setup through `node .a365-kit/run-a365.mjs setup ...` with the same approved arguments catches this hand-off. If the CLI says the blueprint needs `maven-prod [Agent365.Observability.OtelWrite]` consent, follow the `grant-observability-access` add-on: `node .a365-kit/grant-observability.mjs --check` shows what is missing, then an administrator runs it with `--grant` and confirms. An access package is an optional alternative, in `.a365-kit/shared/observability-access-package.md`. A CLI exit 0 is not completed consent: re-run `--check` until every line reads granted.
 
-> **Local revision corrections:** Before commands or code edits, read `.a365-kit/shared/local-runtime-lessons.md`. Its verified identity, authentication, transport and verification corrections supersede conflicting older snippets below. Preserve the existing framework and explicit user choices.
+> **Kit runtime corrections:** Before commands or code edits, read `.a365-kit/shared/local-runtime-lessons.md`. Its verified identity, authentication, transport and verification corrections supersede conflicting older snippets below. Preserve the existing framework and explicit user choices.
 
 > **Trigger phrases** — any of these will activate this skill:
 > - "make this agent an ai teammate"
@@ -102,7 +103,7 @@ hooks:
 > **Prerequisite:** Run `a365-setup` first — it registers the agent with Agent 365 and writes
 > the detection cache that this skill reads.
 >
-> **Supported languages:** Node.js (LangChain, OpenAI Agents SDK, Claude SDK, Semantic Kernel, Google ADK) · .NET (AgentFramework, Semantic Kernel) · Python (AgentFramework on the pinned Agents 1.6 profile)
+> **Supported languages:** Node.js (LangChain, OpenAI Agents SDK, Claude SDK, Semantic Kernel, Google ADK) · .NET (AgentFramework, Semantic Kernel) · Python (AgentFramework, LangChain, OpenAI, Claude, Semantic Kernel, Google ADK)
 
 ---
 
@@ -113,7 +114,7 @@ hooks:
 Run in parallel and combine results:
 
 - **Glob** `**/*.csproj`, `package.json`, `requirements.txt`, `pyproject.toml`, `src/**/*.ts`, `**/*.cs`, `**/*.py` → does any agent code or project file exist? Call this `hasProjectFiles`.
-- **Read** `.a365-workspace-detection.local.json` → does the cache exist, and is `detectedAt` within 60 minutes? Call this `cacheState` (`fresh`, `stale`, or `missing`).
+- **Read** `.a365-kit/shared/local-work.md` and run `node .a365-kit/local-work.mjs status`: map `unchanged` to `cacheState = fresh`, `refresh-required` to `stale`, and `missing` to `missing`. These describe local classification only. Invalid metadata must be repaired through local detection; never invent defaults or infer tenant readiness. If the helper is unavailable, treat existing metadata as needing local refresh.
 - **Parse `$ARGUMENTS`** for an explicit framework hint (e.g. `dotnet`, `dotnet-sk`, `langchain`, `openai`, `claude`, `semantickernel`, `googleadk`, `python`) and the word `create`. Store as `argFramework` and `argCreateIntent`.
 
 Decide what to do next from this table — do not fall through to Step 2 until one of these branches has run:
@@ -122,8 +123,9 @@ Decide what to do next from this table — do not fall through to Step 2 until o
 |--------------|-------------------|--------|
 | `fresh`      | —                 | Continue to Step 2 below (load cache). |
 | `missing`    | false             | **Empty workspace, new-agent path.** Tell the user: *"This is a fresh workspace — I'll scaffold a starter agent from Agent365-Samples first, then run `a365-setup` to register it."* Jump directly to **Phase 0A.5**. If `argFramework` is set, pre-select the matching sample (e.g. `dotnet` → option 1, `dotnet-sk` → option 2, `langchain` → option 3, etc.) and skip the menu. After scaffolding completes, **Read** `.a365-kit/skills/a365-setup/SKILL.md` and follow it to register the new agent — then return to Step 2 below. |
-| `missing`    | true              | Tell the user: *"I found existing agent code but no Agent 365 registration. I'll run `a365-setup` now to register it and detect its framework, then continue here automatically."* **Read** `.a365-kit/skills/a365-setup/SKILL.md` and follow it to completion, then return to Step 2 below. |
-| `stale`      | —                 | Tell the user the detection cache is stale (>60 min) and re-run `a365-setup` the same way as the `missing + true` row, then return to Step 2. |
+| `missing`    | true              | Tell the user: *"I found existing agent code but no confirmed local detection metadata. I'll run the initial `a365-setup` detection and choice flow, check existing blueprint configuration before any provisioning, then continue here."* **Read** `.a365-kit/skills/a365-setup/SKILL.md` and follow it to completion, then return to Step 2 below. |
+| `stale`      | true              | Follow **Refresh local detection without provisioning** in `.a365-kit/shared/local-work.md`, preserving explicit choices, then return to Step 2. Do not rerun setup/provisioning because of cache age. Keep the later kind/authentication, capability and blueprint verification gates. |
+| `stale`      | false             | No usable agent code remains. Follow the existing empty-workspace scaffold/confirmation path in Phase 0A.5 rather than inferring a framework or tenant state from old metadata. |
 
 > **Why this triage exists:** Phase 0A.5 was designed for the empty-workspace new-agent path, but is only reachable after Step 2 succeeds. Without this triage, a user running `/make-ai-teammate create a dotnet agentframework agent` in an empty directory gets a "run a365-setup first" wall instead of the scaffold flow they asked for.
 
@@ -137,7 +139,7 @@ Decide what to do next from this table — do not fall through to Step 2 until o
 
 This guard exists because earlier sessions have rationalised past Step 1's triage and run all of Phase 1 onward without the cache, producing partially-wired agents with no detection metadata. The stop hook (`validate-make-ai-teammate.js`) will fail the session at end if the cache file is still missing.
 
-(Only reached once the cache is fresh — either it already was, or `a365-setup` just wrote it.)
+(Only reached with confirmed local classification: an unchanged fingerprint, a completed local refresh, or the normal initial setup. Tenant state is still verified separately.)
 
 Load from cache:
 - `programmingLanguage` → use as `language`
@@ -149,7 +151,7 @@ Load from cache:
 
 *DotNet:* **Glob** `**/*.cs` and **Grep** for `AddAgent<`, `AgentApplication`, `IChatClient`, `Microsoft.SemanticKernel`, or `WebApplication.CreateBuilder`. Store `Program.cs` and agent `.cs` files.
 
-*Python:* **Glob** `**/*.py` and **Grep** for `RawAgent`, `OpenAIChatCompletionClient`, `ChatAgent` (legacy), `CloudAdapter` (or legacy `CloudAdapterAiohttp`), or `AgentInterface`.
+*Python:* **Glob** `**/*.py` and **Grep** for `ChatAgent`, `AzureOpenAIChatClient`, `CloudAdapter` (or legacy `CloudAdapterAiohttp`), or `AgentInterface`.
 
 Store the main source file(s) as `existingFiles`.
 
@@ -261,7 +263,7 @@ Run the relevant check for the chosen sample:
 |--------|--------------|------------------------|
 | .NET (1, 2) | `dotnet --version` | https://dotnet.microsoft.com/download (requires .NET 8+) |
 | Node.js (3, 4) | `node --version && npm --version` | https://nodejs.org (requires Node.js 18+) |
-| Python (5, 6, 7) | `python --version` or `python3 --version` | https://www.python.org/downloads (pinned generated AF profile: Python 3.12) |
+| Python (5, 6, 7) | `python --version` or `python3 --version` | https://www.python.org/downloads (requires 3.11+) |
 
 If the check fails:
 > "**{tool} is not installed or is below the minimum version.** Please install it from
@@ -310,7 +312,7 @@ Before continuing, install the sample's dependencies so subsequent build steps s
 |----------|---------|
 | Node.js | `npm install` |
 | .NET | `dotnet restore` |
-| Python AF profile | `uv sync` (virtual project) or `python -m pip install -r requirements.txt` in the project venv |
+| Python | `uv sync` (preferred) or `pip install -e .` |
 
 If `uv` is not installed for Python:
 ```bash
@@ -358,8 +360,8 @@ Ask: "What language and framework are you using?" and set `language` and `agentS
 - `ToolingManifest.json` exists → `hasManifest`
 - **Observability composite:**
   - `obs_entry`   = `use_microsoft_opentelemetry` in any `**/*.py`
-  - `obs_token`   = for the pinned teammate profile: the same `TOKEN_STORE` has `bind_loop` startup, `register_turn` producer and `token_resolver` consumer; S2S retains its separate `run_token_service` / `get_s2s_observability_token`
-  - `obs_handler` = `Agents16BaggageMiddleware` OR existing verified `BaggageBuilder` / `populate_baggage` / `InvokeAgentScope` wiring in `**/*.py`
+  - `obs_token`   = `token_resolver` OR `AgenticTokenCache` OR `cache_agentic_token` OR S2S: `run_token_service` / `get_s2s_observability_token`
+  - `obs_handler` = `BaggageBuilder` OR `populate_baggage` OR `InvokeAgentScope` in any `**/*.py`
   - `has_obs_complete` = `obs_entry && obs_token && obs_handler`
   - `has_obs_partial`  = `obs_entry && !has_obs_complete`
   - `has_obs`          = `has_obs_complete`
@@ -373,7 +375,7 @@ Ask: "What language and framework are you using?" and set `language` and `agentS
       - NodeJS OpenAI / Claude SDK: `addToolServersToAgent` in `src/**/*.ts`
       - .NET AF: `GetMcpToolsAsync` in `**/*.cs`
       - .NET SK: `AddToolServersToAgentAsync` in `**/*.cs`
-      - Python AF profile: `AgentFrameworkMcpTools` plus the `for_turn` call and explicit WorkIQ enablement; other verified Python OpenAI/ADK profiles retain their own `add_tool_servers_to_agent` contract
+      - Python AF / OpenAI / Google ADK: `add_tool_servers_to_agent` in `**/*.py`
   - `wiq_word_mention` (gated — only relevant when stack = Node.js LangChain AND manifest contains `mcp_WordServer`):
       `WpxComment` AND `proactive` AND `userKeyToConversationId` all present in `src/**/*.ts`
   - `has_workiq_complete` = `wiq_manifest && wiq_code && (Word-mention gate satisfied OR not applicable)`
@@ -417,7 +419,7 @@ If `agentStack` is still unknown, ask which LLM framework the agent uses.
 If `agentStack` is unrecognized, tell the user:
 > "This skill supports all major frameworks: .NET (AgentFramework, Semantic Kernel),
 > Node.js (LangChain, OpenAI Agents SDK, Claude SDK, Semantic Kernel, Google ADK), and
-> Python (AgentFramework on the pinned Agents 1.6 profile).
+> Python (AgentFramework, LangChain, OpenAI, Claude, Semantic Kernel, Google ADK).
 > For other frameworks, I'll add the hosting layer and agent class, but you'll need to
 > integrate your LLM calls manually."
 
@@ -518,8 +520,6 @@ What would you like to do?
 
 ---
 
-> **Python generation gate:** Only the pinned Agent Framework/Agents 1.6 profile is generated automatically. For Python Claude, OpenAI Agents, LangChain, Semantic Kernel or Google ADK, stop before scaffolding/installing and preserve the existing app for a separately verified migration. Do not reuse the AF-only MCP helper. Unsigned Python AgentsPlayground hosting is not part of the authenticated profile.
-
 ## Phase 1 — Install Required Packages
 
 **Mark task in progress.**
@@ -604,23 +604,12 @@ Migrate it to the CloudAdapter pattern:
 
 ### Python — Add host_agent_server.py
 
-For the supported AF profile, read the pinned manifests and complete host in
-`python-ai-teammate.md`. Generate/migrate `host_agent_server.py` and
-`agent_interface.py`, and the one `observability_tokens.py` /
-`observability_bootstrap.py` pair from `python-observability.md`.
+**Glob** `host_agent_server.py`. If it exists, check for `CloudAdapter` (or legacy `CloudAdapterAiohttp`), `/api/messages`, `/api/health`, and `on_agent_notification`.
 
-Existing hosting is complete only if it uses `AgentApplication`, `app.auth`,
-`CloudAdapter.process(request, app)`, configured JWT middleware, typed
-notifications/Activities, the Agents 1.6 baggage callback bridge, an executable
-`__main__`, and aiohttp cleanup that drains the token store on the live loop.
-Do not preserve `adapter.on_activity`, `adapter.authorization`,
-`MsalConnectionManager.from_environment()` or a warning-only legacy host.
+If it does not exist, **Write** `host_agent_server.py` using the pattern from `python-ai-teammate.md`.
+Also create `agent_interface.py` using the pattern from `python-ai-teammate.md` if it does not exist.
 
-Read the host's explicit generated module list; do not omit required helper
-files merely because telemetry/WorkIQ export is currently disabled. Validate
-health=200 and anonymous messages=401 before marking hosting complete.
-
-**Mark task complete only after the executable checks pass.**
+**Mark task complete.**
 
 ---
 
@@ -673,25 +662,21 @@ Check each registration and add only what is missing:
 
 ### Python — Update agent.py
 
-Use the complete pinned AF implementation in `python-ai-teammate.md`.
-Migrate `OpenAIChatCompletionClient`, `RawAgent`, `run(message)`, `.text`, model
-client ownership and MCP session cleanup together. Do not substitute
-`OpenAIChatClient` (Responses) while retaining the Chat Completions API version,
-or pass the removed `system_prompt` run argument.
+**Read** `agent.py` if it exists.
 
-Preserve business instructions, deployment configuration, custom tools and
-enabled capabilities. Before editing, recognize both legacy WorkIQ anchors
-and `AgentFrameworkMcpTools` / `for_turn`, plus `TOKEN_STORE`,
-`Agents16BaggageMiddleware` and `token_resolver`. Preserve the new working
-lifetimes. Deliberately migrate old first-turn/lifetime `self.agent` MCP wiring
-instead of retaining incompatible calls or creating a second agent/cache.
+**If agent.py does NOT implement `AgentInterface`:**
+**Write** `agent.py` using the full pattern from `python-ai-teammate.md`.
+- Preserve existing LLM client configuration (endpoint, deployment, API key env vars).
+- Preserve existing system prompt if one exists.
 
-Generate the defined `mcp_tool_registration_service.py` helper. Leave
-`ENABLE_WORKIQ=false` unless WorkIQ was explicitly configured; preserve true
-when migrating a previously enabled app. If renaming `MyAgent`, update its
-host `__main__` import/call too.
+**If agent.py already implements `AgentInterface`:**
+Check and add only what is missing:
+- `_sanitize_display_name()` before injecting into system prompt
+- `handle_agent_notification_activity()` handling `NotificationTypes.EMAIL_NOTIFICATION`
 
-**Mark task complete after import and offline behavior checks.**
+> ⚠️ **Preserve prior-skill additions when re-writing agent.py.** If a prior run of `add-workiq-tools` ran, `agent.py` will already contain `tool_service`, `mcp_servers_initialized`, and a `setup_mcp_servers(...)` method called from `process_user_message`. The full-rewrite branch above MUST preserve these — otherwise re-running `make-ai-teammate` after WorkIQ silently clobbers the MCP wiring. **Pre-check**: grep `agent.py` for `tool_service`, `add_tool_servers_to_agent`, or `McpToolRegistrationService` BEFORE overwriting. If present, switch to the additive branch (check-and-add) and explicitly keep those lines. Same rule applies to `instrument-observability` additions (`BaggageBuilder` import, `with builder.build():` block) — preserve, don't overwrite.
+
+**Mark task complete.**
 
 ---
 
@@ -807,8 +792,7 @@ Append only the missing variables.
 
 ### NodeJS
 ```bash
-npm install
-npm run build || npx tsc --noEmit
+node .a365-kit/local-work.mjs run npm-install && node .a365-kit/local-work.mjs run node-build
 ```
 Fix errors:
 - Module resolution errors → check `"module": "node16"` AND `"moduleResolution": "node16"` in tsconfig
@@ -817,8 +801,7 @@ Fix errors:
 
 ### .NET
 ```bash
-dotnet restore
-dotnet build
+node .a365-kit/local-work.mjs run dotnet-restore && node .a365-kit/local-work.mjs run dotnet-build
 ```
 Fix errors:
 - `namespace not found` → check the package is installed and using directive is present
@@ -827,23 +810,14 @@ Fix errors:
 - `IAgentHttpAdapter` not found → ensure `Microsoft.Agents.Hosting.AspNetCore` is installed
 
 ### Python
-
-Restore the declared pinned requirements in the project's isolated environment
-(`uv sync`, or `python -m pip install -r requirements.txt`). Then:
-
-```powershell
-python -c "import host_agent_server, agent, observability_tokens, observability_bootstrap; print('imports OK')"
-python host_agent_server.py
+```bash
+node .a365-kit/local-work.mjs run uv-sync
+# or: pip3 install -e . 2>/dev/null || pip install -e .
+python3 -c "import host_agent_server; import agent; print('imports OK')" 2>/dev/null || python -c "import host_agent_server; import agent; print('imports OK')"
 ```
-
-For offline verification set exporter=false and
-`MICROSOFT_OTEL_SDKSTATS_DISABLED=true`. Validate GET health=200 and anonymous
-POST messages=401; use mocked JWT/MSAL/outbound/model boundaries for authenticated
-message/notification tests. Import success alone does not prove those paths.
-The real SDK response for a successfully handled message/notification is 202.
-Do not send synthetic credentials or unverified JWTs to a tenant/model service.
-Missing packages: restore the manifest; do not guess a package from a namespace
-or hide failures with a fallback shell command. The tested interpreter is 3.12.
+Fix errors:
+- `ModuleNotFoundError` for `microsoft_agents_a365_*` → run `uv add <package>` or `pip install <package>`
+- `requires-python` mismatch → ensure Python 3.11+ is active
 
 Do NOT revert changes on build failure — fix forward.
 
@@ -1006,7 +980,8 @@ If you want to push a code change, re-run /make-ai-teammate and pick "Re-publish
 
 | Situation | Language | Action |
 |-----------|----------|--------|
-| Detection cache missing or stale | Any | Run `a365-setup` first |
+| Detection metadata missing | Any | Use the normal initial detection/confirmation flow; retain existing blueprint reuse checks |
+| Local detection changed or unrecorded | Any | Refresh local facts via `.a365-kit/shared/local-work.md`; do not reprovision because of age |
 | `agentStack` not in cache | Any | Ask the user; default to AgentFramework patterns |
 | Existing `index.ts` has complex custom middleware | NodeJS | Preserve it; add A365 routes alongside existing ones |
 | `client.ts` uses unrecognized framework | NodeJS | Stub `Client.invoke()`; tell user what to fill in |
@@ -1017,7 +992,7 @@ If you want to push a code change, re-run /make-ai-teammate and pick "Re-publish
 | `Kernel` / `IChatCompletionService` not found | .NET (Semantic Kernel) | Ensure `Microsoft.SemanticKernel` NuGet package is installed |
 | `Microsoft.Agents.A365.*` not found | .NET | check NuGet source includes prerelease feeds |
 | `ModuleNotFoundError` for `microsoft_agents_a365_*` | Python | Run `uv add <package>` |
-| `requires-python` version mismatch | Python | Use Python 3.12 in the pinned AF profile's virtual environment |
+| `requires-python` version mismatch | Python | Ensure Python 3.11+ is active in the virtual environment |
 
 ---
 

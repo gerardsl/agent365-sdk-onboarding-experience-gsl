@@ -1,14 +1,17 @@
 # Verified local-runtime corrections
 
-This local revision supplements the pinned release snapshot. Apply these corrections
-before following older command snippets or language recipes. The installed CLI's help
+Lessons recorded while onboarding real agents with this kit, contributed by Gerard
+Salvador López (September 2026). Apply these corrections before following older command
+snippets or language recipes. The installed CLI's help
 and actual SDK contracts take precedence over remembered flags. These are reusable
 lessons, not permission to copy another tenant's identities, tokens or policy settings.
 
 ## Choose the right workspace
 
-Prepare exactly one example in a new directory outside the bundle. For the extended
-.NET local workflow, choose `dotnet-agent365-lab`; it includes executable offline
+The kit installs into an existing agent project; that is the primary path. If you are
+starting from one of the repository's examples, prepare exactly one into a new directory
+with `tools/prepare-workspace.mjs`. For the extended .NET local workflow, choose
+`dotnet-agent365-lab`; it includes executable offline
 checks and opt-in Teams, Work IQ, Purview and mailbox patterns. Keep an existing
 agent's framework. Do not replace its logic just to match a sample.
 The extended starter ships optional host/telemetry code before any identity is
@@ -18,6 +21,28 @@ Java, Go and Rust console examples are also available. Java needs a deliberate
 adapter to the kit's Java hosting guidance; Go/Rust are manual-integration stacks.
 Never treat an unknown-language validator's `ok` as successful onboarding, and
 never silently replace one of these agents with another language/framework.
+
+## Prerequisite work within one onboarding run
+
+Use `doctor.js --setup --json` from `.a365-kit` for the complete setup preflight.
+It runs independent read-only probes at most four at a time; both launchers use
+the same checker for their smaller prerequisite scan. Each invocation checks
+fresh state and writes no cache.
+
+Carry successful tool checks and the actual successful a365 install/update
+result forward in the current onboarding conversation, rather than rerunning
+them every time a sub-skill returns to setup. Invalidate relevant checks after
+an install, upgrade, working-directory or tool-environment change, and rerun
+when evidence is missing. A new top-level onboarding or explicit refresh starts
+a new run. Before reusing an update, confirm `a365 --version` still matches its
+recorded post-update version. A version string alone is not update evidence.
+
+Prerequisite/update reuse remains conversation-scoped. Separately,
+`.a365-kit/shared/local-work.md` defines change-aware local detection and shared
+restore/compiler receipts. Only unchanged local classification and successful
+local work are reusable; timestamp age alone does not trigger provisioning.
+The informational masked sign-in row never replaces live account, tenant,
+permission or consent checks. Keep installation and tenant-operation approvals.
 
 ## Identity is not one ID
 
@@ -47,15 +72,14 @@ Purview protected-app location. Record how each value was obtained.
   `node .a365-kit/run-a365.mjs setup ...`, preserving all approved CLI arguments.
   The guarded runner keeps failures nonzero and prints the recovery steps for
   the specific `maven-prod [Agent365.Observability.OtelWrite]` administrator handoff.
-  If you ran `a365` directly and see that message, use
-  `node .a365-kit/run-a365.mjs --explain-observability-consent` rather than rerunning
-  provisioning just to display help. Follow
-  `.a365-kit/shared/observability-access-package.md`: create the access package
-  with Resource `maven-prod`, Type `OAuthApplication`, Sub Type `API`, Role
-  `Agent365.Observability.OtelWrite`; create an initial policy, assign the package
-  to the intended blueprint, and wait for its assignment status to be **Delivered**
-  before resuming the affected step. Do not mark setup or observability complete
-  merely because a policy exists, the assignment is approved, or the CLI exited zero.
+  If you ran `a365` directly and see that message, do not rerun provisioning just to
+  display help. Follow the `grant-observability-access` add-on:
+  `node .a365-kit/grant-observability.mjs --check` reports what is missing, and an
+  administrator grants it with `--grant`. Include the blueprint as a principal when the
+  exporter signs in with the blueprint's client secret (Java, Go, Rust). An access package
+  (`.a365-kit/shared/observability-access-package.md`) is the alternative when the tenant
+  wants approvals and expiry. Do not mark setup or observability complete until `--check`
+  reports every grant, whatever the CLI exit code.
 - Check available flags with `a365 ... --help`. Do not assume every command has
   `--device-code`; the token command does, while other commands may not.
 - Display device codes promptly. After a timeout, refresh only the failed resource.
@@ -164,24 +188,9 @@ Inspect the exact diagnostic message and do not resend automatically.
 
 ## Purview
 
-Keep the protected app location separate from the OAuth client and token user.
-Request only runtime `ProtectionScopes.Compute.User` and `Content.Process.User`;
-management consent permissions belong to an authorized management client.
-
-Check uploadText before the model and downloadText before returning a reply.
-Keep a stable correlation and increasing sequence for a stateful conversation.
-Honor block actions even alongside processing errors; handle 202/204 without
-parsing a body. Cache ETags and invalidate on modified policy state.
-Token/HTTP/processing failures obey the explicitly selected fail mode, with
-visible warnings for fail-open. Do not store a blocked reply in conversation history.
-
-Collection/`evaluateOffline` and HTTP 200 do not demonstrate inline blocking.
-For app-targeted sensitive-information prompt blocking, follow current
-`New-DlpCompliancePolicy`/`New-DlpComplianceRule` guidance: Applications workload,
-Application enforcement plane, and the confirmed app location. Verify billing,
-active policy-management roles, distribution, a benign prompt and a synthetic
-matching blocked prompt. An existing policy should be inspected, not overwritten.
-
-Prompt/reply checks are not a tool-boundary firewall and cannot undo a tool's side
-effects. Do not claim universal response blocking, IRM visibility, or Junk-folder
-avoidance from the local checks.
+Use Microsoft's `purview-dlp-integration` skill and its guard, scripts and wiring,
+and read `.a365-kit/shared/purview-kit-notes.md` before its Step 2. Do not store a
+blocked reply in conversation history. Collection and HTTP 200 do not demonstrate
+inline blocking; a synthetic matching prompt blocked before the model call does.
+An existing policy is inspected, never overwritten. Prompt checks are not a
+tool-boundary firewall and cannot undo a tool's side effects.

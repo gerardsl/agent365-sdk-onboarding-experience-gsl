@@ -1,5 +1,9 @@
 # Python hosting layer for a blueprint-based Agent 365 agent
 
+Verified 2026-09-04 against `microsoft-agents` 1.6.0 and `microsoft-opentelemetry` 1.3.8 on a real
+tenant: health 200, anonymous POST 401, and an agent answering in Teams. The host below is the
+later audited revision of that pattern.
+
 The original recipe was verified 2026-09-04 against `microsoft-agents` **1.6.0** and
 `microsoft-opentelemetry` **1.3.8** on a tenant. This revision is checked with those SDK
 versions in isolated offline fixtures: imports, mocked model callbacks, health 200,
@@ -241,8 +245,8 @@ class GenericAgentHost:
         request = Request(content=text, session_id=conversation_id or "session",
                           conversation_id=conversation_id or "conversation", channel=Channel(name=channel_name))
 
-        # Park an OBO-exchanged token for the span exporter. The observability skill wires the
-        # AgenticTokenCache as resolver but nothing registers a token per turn without this.
+        # Register an OBO-exchanged token for the span exporter on each turn. Observability setup
+        # wires AgenticTokenCache as the resolver, but nothing registers a token without this.
         if AUTH_HANDLER_NAME and tenant_id and agent_id and self._authorization is not None:
             try:
                 from microsoft.opentelemetry.a365.hosting.token_cache_helpers import AgenticTokenStruct
@@ -395,7 +399,7 @@ Loading MCP servers from: ToolingManifest.json <- manifest, not the gateway
 SharePoint and OneDrive both publish `getFileOrFolderMetadataByUrl` and `getSensitivityLabels`. The OpenAI Agents SDK refuses duplicates and raises `UserError: Duplicate tool names found across MCP servers`, which fails the whole turn. Namespace them **after** attachment, because `add_tool_servers_to_agent` returns a fresh `Agent`:
 
 ```python
-# Inside the per-turn adapter method above, after attachment:
+# Place this inside the per-turn adapter method, after attachment.
 cfg = {**(base.mcp_config or {}), "include_server_in_tool_names": True}
 turn_agent = base.clone(mcp_servers=list(attached.mcp_servers or []), mcp_config=cfg)
 ```

@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Agent 365 Onboarding Kit -- prerequisite check and per-CLI activation steps.
+    Agent 365 Onboarding Kit: prerequisite check and per-CLI activation steps.
 
 .DESCRIPTION
     Run this from the root of your agent project after extracting the kit into it.
-    The script does not onboard anything itself -- the skills do that. It:
+    The skills do the onboarding. This script only:
 
       1. Confirms the kit extracted to the right place.
       2. Warns if you are in an elevated shell (a common cause of "command not found").
@@ -13,9 +13,9 @@
       5. Prints the exact steps to load the skills in each one.
 
     The skills work with any CLI that reads one of these locations:
-      .claude/skills/    Claude Code
-      .agents/skills/    VS Code agent mode, Copilot cloud agent, gh skill
-      .github/           GitHub Copilot CLI, VS Code Copilot Chat
+      .claude/skills/    Claude Code, GitHub Copilot CLI
+      .agents/skills/    GitHub Copilot CLI, VS Code agent mode, Copilot cloud agent, gh skill
+      .github/copilot-instructions.md   VS Code Copilot Chat; extra grounding for Copilot CLI
 
 .PARAMETER DoctorOnly
     Run the prerequisite check and exit, without printing activation steps.
@@ -25,17 +25,17 @@
 
 .PARAMETER WireCopilot
     Create or append the Agent 365 skill instructions to .github/copilot-instructions.md.
-    Never overwrites an existing file -- appends to it, once.
+    An existing file is appended to once, never overwritten.
 
 .PARAMETER WireClaudeHook
     Add the optional SessionStart upstream-version notice to .claude/settings.json.
     Skipped automatically if that file already exists.
 
 .PARAMETER Launch
-    Which CLI to launch once the checks pass. Currently supports 'claude'.
+    The CLI to launch once the checks pass. Only 'claude' is supported.
 
 .PARAMETER Update
-    Replace the kit in this project with the latest release. Touches ONLY kit paths
+    Replace the kit in this project with the latest release. Touches only kit paths
     (.a365-kit, the kit's own skill folders under .claude/skills and .agents/skills, the
     launchers, and AGENT365-KIT-README.md). Your agent, .env, config and .claude/settings.json
     are never modified.
@@ -92,35 +92,43 @@ Write-Host ''
 Write-Host 'Agent 365 Onboarding Kit' -ForegroundColor White
 Write-Host '========================' -ForegroundColor DarkGray
 
-# -- Update source --------------------------------------------------------------
-# Resolved in this order so an organisation that mirrors the kit internally can pin
-# it once and forget it:
-#   1. -UpdateFrom                (this call)
-#   2. $env:A365_KIT_UPDATE_SOURCE (this shell / CI job)
-#   3. a365-kit.config.json       (this project -- lives OUTSIDE the paths -Update replaces)
-#   4. .a365-kit\KIT-VERSION.json (default baked in at build time)
-#   5. the public GitHub release
-
+# a365-kit.config.json sits outside the paths -Update replaces, so a team that
+# mirrors the kit can set its update source once.
 $KitConfigPath = Join-Path $KitRoot 'a365-kit.config.json'
-$PublicSource  = 'https://github.com/AkramMSFT/agent365-onboarding-kit/releases/latest/download/agent365-onboarding-kit-latest.zip'
+$PublicSource  = 'https://github.com/AkramMSFT/agent365-sdk-onboarding-experience/releases/latest/download/agent365-onboarding-kit-latest.zip'
+
+# Windows PowerShell 5.1 reads BOM-less files in the ANSI code page, writes a BOM with
+# -Encoding UTF8 and has no ConvertFrom-Json -AsHashtable, so these helpers avoid them.
+function Read-KitText([string] $Path) { [IO.File]::ReadAllText($Path) }
+function Write-KitText([string] $Path, [string] $Text, [switch] $Append) {
+    $utf8 = [Text.UTF8Encoding]::new($false)
+    if ($Append) { [IO.File]::AppendAllText($Path, $Text, $utf8) } else { [IO.File]::WriteAllText($Path, $Text, $utf8) }
+}
+function ConvertFrom-KitJson([string] $Json) {
+    if ($PSVersionTable.PSVersion.Major -ge 7) { return ,($Json | ConvertFrom-Json -AsHashtable -NoEnumerate) }
+    Add-Type -AssemblyName System.Web.Extensions
+    $serializer = [System.Web.Script.Serialization.JavaScriptSerializer]::new()
+    $serializer.MaxJsonLength = [int]::MaxValue
+    return ,$serializer.DeserializeObject($Json)
+}
 
 function Get-UpdateSource {
     if ($UpdateFrom) { return @{ Value = $UpdateFrom; Origin = '-UpdateFrom' } }
     if ($env:A365_KIT_UPDATE_SOURCE) { return @{ Value = $env:A365_KIT_UPDATE_SOURCE; Origin = 'A365_KIT_UPDATE_SOURCE' } }
     if (Test-Path -LiteralPath $KitConfigPath) {
         try {
-            $c = Get-Content -LiteralPath $KitConfigPath -Raw | ConvertFrom-Json -NoEnumerate
-            if ($c -is [pscustomobject] -and $c.updateSource -is [string] -and -not [string]::IsNullOrWhiteSpace($c.updateSource)) {
-                return @{ Value = $c.updateSource; Origin = 'a365-kit.config.json' }
+            $c = ConvertFrom-KitJson (Read-KitText $KitConfigPath)
+            if ($c -is [System.Collections.IDictionary] -and $c['updateSource'] -is [string] -and -not [string]::IsNullOrWhiteSpace($c['updateSource'])) {
+                return @{ Value = $c['updateSource']; Origin = 'a365-kit.config.json' }
             }
         } catch { Write-Warn "a365-kit.config.json is not valid JSON -- ignoring it" }
     }
     $m = Join-Path $KitRoot '.a365-kit\KIT-VERSION.json'
     if (Test-Path -LiteralPath $m) {
         try {
-            $mv = Get-Content -LiteralPath $m -Raw | ConvertFrom-Json -NoEnumerate
-            if ($mv -is [pscustomobject] -and $mv.updateSource -is [string] -and -not [string]::IsNullOrWhiteSpace($mv.updateSource)) {
-                return @{ Value = $mv.updateSource; Origin = 'kit build default' }
+            $mv = ConvertFrom-KitJson (Read-KitText $m)
+            if ($mv -is [System.Collections.IDictionary] -and $mv['updateSource'] -is [string] -and -not [string]::IsNullOrWhiteSpace($mv['updateSource'])) {
+                return @{ Value = $mv['updateSource']; Origin = 'kit build default' }
             }
         } catch { }
     }
@@ -131,7 +139,7 @@ if ($PSBoundParameters.ContainsKey('SetUpdateSource')) {
     Write-Head 'Kit update source'
     $cfg = @{}
     if (Test-Path -LiteralPath $KitConfigPath) {
-        $cfg = Get-Content -LiteralPath $KitConfigPath -Raw | ConvertFrom-Json -AsHashtable -NoEnumerate
+        $cfg = ConvertFrom-KitJson (Read-KitText $KitConfigPath)
         if ($cfg -isnot [System.Collections.IDictionary]) {
             throw 'a365-kit.config.json must contain a JSON object; it was not changed.'
         }
@@ -143,7 +151,7 @@ if ($PSBoundParameters.ContainsKey('SetUpdateSource')) {
         $cfg['updateSource'] = $SetUpdateSource
         Write-Ok "Project update source set to: $SetUpdateSource"
     }
-    ($cfg | ConvertTo-Json -Depth 100 -WarningAction Stop) | Set-Content -LiteralPath $KitConfigPath -Encoding UTF8
+    Write-KitText $KitConfigPath (($cfg | ConvertTo-Json -Depth 100 -WarningAction Stop) + "`n")
     Write-Note 'Written to a365-kit.config.json -- commit it so your whole team updates from the same place.'
     $r = Get-UpdateSource
     Write-Note "-Update will now use: $($r.Value)  [$($r.Origin)]"
@@ -151,11 +159,8 @@ if ($PSBoundParameters.ContainsKey('SetUpdateSource')) {
     exit 0
 }
 
-# -- 0. Self-update ------------------------------------------------------------
-# Replaces kit paths only. Anything the user owns is left alone, and the set of
-# skill folders to replace is read from the NEW kit's manifest, so a skill that
-# upstream removes is removed here too rather than lingering.
-
+# Skill folders to replace come from both the old and the new manifest, so a skill
+# that upstream dropped is removed rather than left behind.
 if ($Update) {
     Write-Head 'Updating the kit'
     $resolved = Get-UpdateSource
@@ -167,7 +172,7 @@ if ($Update) {
     }
 
     function Read-KitManifest([string] $Path) {
-        $data = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json -AsHashtable -NoEnumerate
+        $data = ConvertFrom-KitJson (Read-KitText $Path)
         if ($data -isnot [System.Collections.IDictionary]) { throw "Invalid kit manifest: $Path" }
         foreach ($field in @('kitVersion', 'upstreamVersion', 'upstreamCommit')) {
             if ($data[$field] -isnot [string] -or [string]::IsNullOrWhiteSpace($data[$field])) {
@@ -197,7 +202,8 @@ if ($Update) {
         }
     }
 
-    $stage = Join-Path $KitRoot ('.a365-kit-update-' + [Guid]::NewGuid().ToString('N'))
+    # Short name: Windows PowerShell 5.1 cannot extract past 260 characters.
+    $stage = Join-Path $KitRoot ('.a365-kit-update-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
     New-Item -ItemType Directory -Path $stage | Out-Null
     $zip = Join-Path $stage 'kit.zip'
     $backedUp = [Collections.Generic.List[string]]::new()
@@ -211,7 +217,9 @@ if ($Update) {
             if (-not (Test-Path -LiteralPath $UpdateFrom -PathType Leaf)) { throw "Not found: $UpdateFrom" }
             Copy-Item -LiteralPath $UpdateFrom -Destination $zip
         }
-        # Check archive paths before extraction, and completeness before moving any installed file.
+        # The archive is untrusted: check entry paths before extracting and completeness
+        # before moving any installed file.
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
         $archive = [IO.Compression.ZipFile]::OpenRead($zip)
         try {
             $entries = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -226,7 +234,8 @@ if ($Update) {
             }
         } finally { $archive.Dispose() }
         $new = Join-Path $stage 'new'
-        Expand-Archive -LiteralPath $zip -DestinationPath $new -Force
+        # The entries were validated above; ZipFile extracts them several times faster than Expand-Archive.
+        [IO.Compression.ZipFile]::ExtractToDirectory($zip, $new)
         foreach ($item in Get-ChildItem -LiteralPath $new -Recurse -Force) {
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Linked archive entry: $($item.FullName)" }
         }
@@ -325,8 +334,6 @@ if ($Update) {
     }
 }
 
-# -- 1. Confirm the kit landed in the right place -----------------------------
-
 $Canonical = Join-Path $KitRoot '.a365-kit\skills\a365-setup\SKILL.md'
 if (-not (Test-Path -LiteralPath $Canonical)) {
     Write-Host ''
@@ -356,13 +363,8 @@ if ((Get-Location).Path -ne $KitRoot) {
     Set-Location -LiteralPath $KitRoot
 }
 
-# -- 2. Elevated-shell check --------------------------------------------------
-# Claude Code, gh, and dotnet global tools install per-user. In an elevated shell
-# the per-user PATH entries are usually absent, so these tools look "not installed"
-# when they are simply not on the Administrator PATH.
-
 $isElevated = $false
-if ($IsWindows) {
+if ($PSVersionTable.PSEdition -eq 'Desktop' -or $IsWindows) {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
     $isElevated = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -386,7 +388,33 @@ if ($isElevated) {
     }
 }
 
-# -- 3. Prerequisites ---------------------------------------------------------
+# The gh capability probes run while the prerequisite check does; their results are read later.
+# Only a gh executable is started early; anything else keeps the synchronous Test-Cli probe.
+function Start-CliProbe([string] $Exe, [string[]] $Arguments) {
+    $command = Get-Command $Exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $command) { return $null }
+    try {
+        $info = [Diagnostics.ProcessStartInfo]::new($command.Source, ($Arguments -join ' '))
+        $info.UseShellExecute = $false
+        $info.CreateNoWindow = $true
+        $info.RedirectStandardOutput = $true
+        $info.RedirectStandardError = $true
+        $process = [Diagnostics.Process]::Start($info)
+        $process.BeginOutputReadLine()
+        $process.BeginErrorReadLine()
+        return $process
+    } catch { return $null }
+}
+function Wait-CliProbe([Diagnostics.Process] $Process) {
+    try { $Process.WaitForExit(); return ($Process.ExitCode -eq 0) }
+    catch { return $false }
+    finally { $Process.Dispose() }
+}
+$ghSkillProbe = $null; $ghCopilotProbe = $null
+if (-not $DoctorOnly) {
+    $ghSkillProbe   = Start-CliProbe 'gh' @('skill', '--help')
+    $ghCopilotProbe = Start-CliProbe 'gh' @('copilot', '--help')
+}
 
 if (-not $SkipDoctor) {
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
@@ -417,8 +445,6 @@ if ($DoctorOnly) {
     exit 0
 }
 
-# -- 4. Optional wiring -------------------------------------------------------
-
 if ($WireCopilot) {
     Write-Head 'Wiring GitHub Copilot instructions'
     $src = Join-Path $KitRoot '.a365-kit\copilot-instructions.md'
@@ -430,16 +456,16 @@ if ($WireCopilot) {
         exit 1
     }
     else {
-        $instructions = Get-Content -LiteralPath $src -Raw
+        $instructions = Read-KitText $src
         if ([string]::IsNullOrWhiteSpace($instructions)) { throw 'The kit Copilot instructions are empty.' }
         $marker = '<!-- agent365-kit:copilot-instructions -->'
-        $existing = if (Test-Path -LiteralPath $dst) { [string](Get-Content -LiteralPath $dst -Raw) } else { '' }
+        $existing = if (Test-Path -LiteralPath $dst) { (Read-KitText $dst) } else { '' }
         $alreadyWired = $existing.Contains($marker) -or
             $existing.Replace("`r`n", "`n").Contains($instructions.Replace("`r`n", "`n").TrimEnd())
         $block = "$marker`n$instructions"
         New-Item -ItemType Directory -Force -Path $dstDir | Out-Null
         if (-not (Test-Path -LiteralPath $dst)) {
-            Set-Content -LiteralPath $dst -Value $block -Encoding UTF8
+            Write-KitText $dst ($block.TrimEnd() + "`n")
             Write-Ok 'Created .github\copilot-instructions.md'
         }
         elseif ($alreadyWired) {
@@ -447,8 +473,7 @@ if ($WireCopilot) {
         }
         else {
             # Append rather than overwrite: this file is commonly project-owned.
-            Add-Content -LiteralPath $dst -Value "`n`n---`n"
-            Add-Content -LiteralPath $dst -Value $block
+            Write-KitText $dst ("`n`n---`n`n" + $block.TrimEnd() + "`n") -Append
             Write-Ok 'Appended Agent 365 instructions to your existing .github\copilot-instructions.md'
         }
     }
@@ -472,12 +497,8 @@ if ($WireClaudeHook) {
     }
 }
 
-# -- 5. Detect CLIs and print activation steps --------------------------------
-
-# NOTE: the parameter is deliberately NOT called $Args -- that is a PowerShell
-# automatic variable, and using it as a parameter name silently breaks binding,
-# so `& gh @Args` runs gh with no arguments, prints help, and exits 0. That makes
-# every probe report success.
+# Not named $Args: that automatic variable breaks parameter binding, so `& gh @Args`
+# would run gh with no arguments, print help and exit 0, and every probe would pass.
 function Test-Cli { param([string] $Exe, [string[]] $Arguments)
     try {
         & $Exe @Arguments *> $null
@@ -489,16 +510,14 @@ $hasClaude = [bool](Get-Command claude -ErrorAction SilentlyContinue)
 $hasGh     = [bool](Get-Command gh     -ErrorAction SilentlyContinue)
 $hasCode   = [bool](Get-Command code   -ErrorAction SilentlyContinue)
 
-# `gh skill` and `gh copilot` are built into gh 2.98+, not extensions, and neither
-# supports a read-only --version probe: `gh skill --version` errors, while
-# `gh copilot --version` can download the Copilot CLI. Use gh's own --help only.
-$hasGhSkill    = $false   # gh can install agent skills
-$hasGhCopilotL = $false   # gh can launch the Copilot CLI (downloads on first use)
+# `gh skill` and `gh copilot` are built into gh 2.98+ and have no safe --version probe:
+# `gh skill --version` errors and `gh copilot --version` can download the Copilot CLI.
+$hasGhSkill    = $false
+$hasGhCopilotL = $false   # gh can launch the Copilot CLI, downloading it on first use
 if ($hasGh) {
-    $hasGhSkill    = Test-Cli 'gh' @('skill', '--help')
-    $hasGhCopilotL = Test-Cli 'gh' @('copilot', '--help')
+    $hasGhSkill    = if ($ghSkillProbe)   { Wait-CliProbe $ghSkillProbe }   else { Test-Cli 'gh' @('skill', '--help') }
+    $hasGhCopilotL = if ($ghCopilotProbe) { Wait-CliProbe $ghCopilotProbe } else { Test-Cli 'gh' @('copilot', '--help') }
 }
-# A standalone CLI is detectable without launching or downloading anything.
 $hasCopilotCli = [bool](Get-Command copilot -ErrorAction SilentlyContinue)
 
 Write-Head 'Detected CLIs'
@@ -523,7 +542,7 @@ Write-Host ''
 
 Write-Host '  GitHub Copilot CLI' -ForegroundColor White
 Write-Note '    Reads .agents/skills/ automatically. From this folder:'
-Write-Cmd 'gh copilot'
+Write-Cmd $(if ($hasCopilotCli -or -not $hasGhCopilotL) { 'copilot' } else { 'gh copilot' })
 Write-Note '    then type the phrase above. For extra grounding, also wire the'
 Write-Note '    instructions file once:'
 Write-Cmd '.\agent365-kit.ps1 -WireCopilot'
@@ -561,17 +580,19 @@ Write-Cmd '"Add WorkIQ tools to this agent."'
 Write-Note '        Microsoft 365 data: mail, calendar, Teams, SharePoint'
 Write-Cmd '"Validate A365 code."'
 Write-Note '        read-only check of telemetry, identity binding and grants'
+Write-Cmd '"Add Purview DLP to my agent."'
+Write-Note '        Purview blocks sensitive prompts before the model; replies can be audited'
 Write-Host ''
 
-# Enumerated, not hardcoded: a new add-on appears here without touching the launcher.
+# Add-ons are listed from disk, so one without an entry here still shows up.
 $AddonPhrases = @{
   'add-messaging-endpoint' = @('"Make this agent chattable in Teams."', 'HTTP host, dev tunnel, endpoint registration')
   'test-local-channel'     = @('"Let me test this agent locally."', 'loopback-only dev channel: no tunnel, no tenant, no Teams')
   'add-mcp-server'         = @('"Add an MCP server."', 'any external MCP server -- not governed by Agent 365')
   'add-lab-tools'          = @('"Add lab tools."', 'local utilities: web fetch, encoders, hashing, text transforms')
-  'add-purview-dlp'        = @('"Add DLP to this agent."', 'Purview checks every prompt and response')
   'add-java-agent'         = @('"Onboard this Java agent."', 'hosting and telemetry for Java, which has no Microsoft SDK')
   'a365-kit'               = @('"Update the Agent 365 kit."', 'replaces only the kit files, never your agent')
+  'grant-observability-access' = @('"Grant observability access to this agent."', 'the maven-prod OtelWrite permission; an administrator confirms the grant')
 }
 if ($AddonNames.Count -gt 0) {
     Write-Host '  Add-ons in this kit' -ForegroundColor White
@@ -590,12 +611,11 @@ if ($AddonNames.Count -gt 0) {
 Write-Host '  ---' -ForegroundColor DarkGray
 Write-Note 'a365-setup is the entry point. It checks prerequisites, asks which capabilities'
 Write-Note 'you want, then hands off to make-ai-teammate or make-a365-agent.'
-Write-Note 'For consent-aware setup, keep your approved options and use:'
+Write-Note 'Run a365 setup in your own terminal when the skill asks. To have the kit catch'
+Write-Note 'the observability consent hand-off, prefix the same command with the wrapper:'
 Write-Cmd 'node .\.a365-kit\run-a365.mjs setup <subcommand> [options]'
-Write-Note 'If maven-prod OtelWrite needs admin consent, follow the access-package handoff and wait for Delivered.'
+Write-Note 'If setup says maven-prod OtelWrite needs admin consent, ask: "Grant observability access to this agent."'
 Write-Host ''
-
-# -- 6. Optional launch -------------------------------------------------------
 
 if ($Launch -eq 'claude') {
     if (-not $hasClaude) {

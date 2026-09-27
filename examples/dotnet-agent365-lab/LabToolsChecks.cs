@@ -37,7 +37,8 @@ internal static class LabToolsChecks
         Check(LabTools.RegexExtract("a1 b2", @"([a-z])(\d)") == "a1\nb2", "Regex capture handling failed.");
         Check(LabTools.RegexExtract(new string('a', 150), "a").Split('\n').Length == 100, "Regex result cap failed.");
         Check(LabTools.RegexExtract("x", "(") == "Invalid regex.", "Invalid regex must report failure.");
-        Check(LabTools.RegexExtract(new string('a', 100_000) + "!", "^(a+)+$") == "Regex timed out.", "Regex timeout failed.");
+        Check(LabTools.RegexTimeout == TimeSpan.FromSeconds(1), "Regex tools must keep their one-second timeout.");
+        Check(LabTools.RegexExtractCore(new string('a', 100_000) + "!", "^(a+)+$", TimeSpan.FromMilliseconds(20)) == "Regex timed out.", "Regex timeout failed.");
 
         using (var handler = new LabLoopClient())
         using (var client = handler.AsBuilder().UseFunctionInvocation().Build())

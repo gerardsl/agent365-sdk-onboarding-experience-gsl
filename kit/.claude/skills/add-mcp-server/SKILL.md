@@ -32,7 +32,7 @@ hooks:
 
 # Add an external MCP server
 
-> **Local revision:** Read `.a365-kit/shared/local-runtime-lessons.md` first.
+> **Kit runtime corrections:** Read `.a365-kit/shared/local-runtime-lessons.md` first.
 > Preserve existing Work IQ tools, per-server identity, namespace limits, TLS
 > validation and per-turn client cleanup. Do not use another server's bearer token
 > or replace a blocked catalog endpoint with an invented one.
@@ -47,9 +47,9 @@ hooks:
 > instead connects the framework to a server without adding Agent 365 registration,
 > approval or tooling-gateway routing. Existing server authentication is separate. Add external
 > servers only for agents you operate, prefer servers you trust or run yourself, and treat
-> their output as untrusted model input. `add-purview-dlp` evaluates the user prompt and
+> their output as untrusted model input. `purview-dlp-integration` evaluates the user prompt and
 > final reply, not intermediate MCP arguments/results; tool-boundary evaluation is
-> additional work. Not part of Microsoft's seven skills.
+> additional work. Not part of Microsoft's skills.
 
 ## How external MCP differs from Work IQ
 

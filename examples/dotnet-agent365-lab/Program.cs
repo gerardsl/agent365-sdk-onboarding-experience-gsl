@@ -41,7 +41,7 @@ internal static class Program
         if (string.IsNullOrWhiteSpace(prompt)) prompt = "Count the words in Hello from Agent 365.";
         if (prompt.Length > 4000 || mode is not ("--mock" or "--live" or "--self-test" or "--a365" or "--a365-check" or "--dlp-check" or "--mail-diagnose" or "--mail-status"))
         {
-            Console.Error.WriteLine("Use --mock, --live, --self-test, --a365, --a365-check or --dlp-check and a prompt of at most 4000 characters.");
+            Console.Error.WriteLine("Use --mock, --live, --self-test, --a365, --a365-check, --dlp-check, --teams, --mail-diagnose or --mail-status and a prompt of at most 4000 characters.");
             return 1;
         }
         var function = AIFunctionFactory.Create(CountWords);

@@ -39,9 +39,9 @@ hooks:
 
 # Agent 365 CLI Setup
 
-> **maven-prod observability consent:** Run setup through `node .a365-kit/run-a365.mjs setup ...` with the same approved arguments. If the CLI says the blueprint needs `maven-prod [Agent365.Observability.OtelWrite]` consent, follow `.a365-kit/shared/observability-access-package.md`: create the access package (Resource=maven-prod, Type=OAuthApplication, Sub Type=API, Role=Agent365.Observability.OtelWrite), create an initial policy, assign the package to that blueprint, and wait for the assignment status **Delivered** before resuming. A policy creation, approval or CLI exit 0 is not completed consent.
+> **maven-prod observability consent:** Running setup through `node .a365-kit/run-a365.mjs setup ...` with the same approved arguments catches this hand-off. If the CLI says the blueprint needs `maven-prod [Agent365.Observability.OtelWrite]` consent, follow the `grant-observability-access` add-on: `node .a365-kit/grant-observability.mjs --check` shows what is missing, then an administrator runs it with `--grant` and confirms. An access package is an optional alternative, in `.a365-kit/shared/observability-access-package.md`. A CLI exit 0 is not completed consent: re-run `--check` until every line reads granted.
 
-> **Local revision corrections:** Before commands or code edits, read `.a365-kit/shared/local-runtime-lessons.md`. Its verified identity, authentication, transport and verification corrections supersede conflicting older snippets below. Preserve the existing framework and explicit user choices.
+> **Kit runtime corrections:** Before commands or code edits, read `.a365-kit/shared/local-runtime-lessons.md`. Its verified identity, authentication, transport and verification corrections supersede conflicting older snippets below. Preserve the existing framework and explicit user choices.
 
 > **Trigger phrases** — any of these will activate this skill automatically:
 > - "set up agent 365 for this agent"
@@ -80,7 +80,7 @@ Detecting your agent now…
 
 ### Phase 1A: Silent Detection
 
-**First: Check for detection cache.** Read `.a365-workspace-detection.local.json` if it exists. If `detectedAt` is within the last 60 minutes, load `agentStack`, `programmingLanguage`, and `usesTeamsOrCopilot` from it and skip the detection steps below — go straight to Phase 1B.
+**First: Check local detection state.** Read `.a365-kit/shared/local-work.md` and run `node .a365-kit/local-work.mjs status` if Node is available. For `unchanged`, reuse only `agentStack`, `programmingLanguage` and `usesTeamsOrCopilot` and skip Steps 1-3 below; still run Steps 4-5 and the existing Phase 1B confirmation/choice gates. Otherwise perform local detection normally. A timestamp alone never determines freshness, and a local refresh never proves registration or consent is missing. If the helper cannot run, report that reuse is unavailable and use the normal detection rules without guessing.
 
 Run all three detection steps **in parallel** (single tool call with multiple Glob/Grep):
 
@@ -139,7 +139,7 @@ Run all checks **in parallel** (Glob + Grep). These three primary flags are writ
 - `Microsoft.Agents.A365.Notifications` in `**/*.csproj`
 - `ToolingManifest.json` exists
 
-*Observability signals (from `instrument-observability`) — `has_obs = 1` ONLY when the new **Microsoft.OpenTelemetry distro API call** is present in source. Package presence alone is NOT enough — legacy `Microsoft.Agents.A365.Observability.*` / `@microsoft/agents-a365-observability` / `microsoft-agents-a365-observability-*` packages might exist without the distro being wired (or the package was added but never called). The source-call check ensures `instrument-observability` re-runs and upgrades partial / legacy wiring onto the current distro. `has_obs = 1` if any one matches:*
+*Observability signals (from `instrument-observability`) require all three anchors: the distro entry point, token resolution, and handler-side baggage/scopes, using the composite definitions in `.a365-kit/shared/agent-detection.md`. Set `has_obs = 0` for partial wiring and preserve the read-time partial signal so the sub-skill can complete it. Packages or a local resume receipt alone never prove completion. The following identify only the entry-point part:*
 
 - `UseMicrosoftOpenTelemetry` in any `**/*.cs` (.NET)
 - `useMicrosoftOpenTelemetry` in any `src/**/*.ts` (Node.js)
@@ -147,8 +147,8 @@ Run all checks **in parallel** (Glob + Grep). These three primary flags are writ
 
 Do NOT count: package-name-only matches (the legacy or new distro package could be installed without the API being called); `A365 Observability` source comments (they outlive the code they reference). If only those weak signals match, treat `has_obs = 0` and let `instrument-observability` run to bring the agent onto the current distro.
 
-*WorkIQ signal — `has_workiq = 1` if:*
-- `ToolingManifest.json` exists AND its top-level `mcpServers` (or `servers` in legacy v1 schema) array is non-empty. Parse the JSON; at least one entry → `has_workiq = 1`.
+*WorkIQ manifest signal (necessary, not sufficient for `has_workiq = 1`):*
+- `ToolingManifest.json` exists AND its top-level `mcpServers` (or `servers` in legacy v1 schema) array is non-empty. Parse the JSON; at least one entry establishes the manifest part only. Set `has_workiq = 1` only when the framework MCP wiring also exists, plus Word mention wiring for Node.js LangChain with `mcp_WordServer`, as defined in `.a365-kit/shared/agent-detection.md`. Otherwise retain the partial-wiring state and let the sub-skill finish it.
 
 These three flags drive the 8-row state matrix used by `make-ai-teammate` Phase 0C and by the `a365-setup` capabilities menu / auth-mode question below.
 
@@ -267,6 +267,8 @@ After the capabilities question is answered (and the detection/confirmation abov
    - Write the three primary state flags from Phase 1A Step 5: `has_aiteammate_structure` (`1`/`0`), `has_obs` (`1`/`0`), `has_workiq` (`1`/`0`). **Do NOT write `hasAITeammateChanges`** — it is derived inline (`has_aiteammate_structure && has_obs`) at read sites.
    - Write `hasBlueprintConfig`, `existingBlueprintId`, and `reuseBlueprint` as determined above. **These are point-in-time snapshots from this skill's run** — downstream skills (make-ai-teammate, instrument-observability) re-derive `disk_blueprint_present` from `a365.generated.config.json` at read-time, and require session-level verification (Step 9.7.1a in make-ai-teammate's three-way prompt) before treating the blueprint claim as authoritative. The cached values exist for debugging and this skill's own end-of-run summary — they will go stale if the user runs `a365 setup all` or `a365 cleanup` between skill invocations.
 
+After writing confirmed detection metadata, run `node .a365-kit/local-work.mjs record` if Node and local receipt storage are available. This records local classification only; it does not complete any tenant step. If reuse is unavailable, continue with normal fresh detection/checks and report the limitation.
+
 3. Derive `registrationType` from Phase 1A signals (do not ask the user):
    - `registrationType = 1` if `usesTeamsOrCopilot = 1` (CEA — Entra app ID path)
    - `registrationType = 3` if `usesTeamsOrCopilot = 0` (Agent (Non AI Teammate) / no M365 integration path)
@@ -319,28 +321,31 @@ You are an AI coding agent with access to execute shell commands, read the Agent
 > - **Claude Code:** call `TaskCreate` once per Step header (already in `allowed-tools`); the list renders natively. Use `TaskUpdate` to flip statuses.
 > - **VS Code Copilot Chat / GitHub Copilot CLI:** `allowed-tools` is ignored — emit a markdown checklist directly in chat (`- [ ] Install and verify prerequisites…`, etc.) and edit items to `- [x]` as each step completes.
 
-> **DO NOT SKIP THIS STEP.** Run all checks even on a machine that seems configured — a fresh laptop may be missing several tools. Mark this todo in-progress now.
+> **DO NOT SKIP PREFLIGHT COVERAGE.** Every required check must have a successful result from this onboarding run, or be checked and handled now. An unchanged, complete same-run report can be reused as described below; merely assuming a machine is configured cannot. Mark this todo in-progress now.
 
-### Quick scan — run all version checks in one pass
+### Quick scan — share one complete prerequisite report per onboarding run
 
-```bash
-echo "--- .NET SDK ---"    && dotnet --version       2>/dev/null || echo "NOT FOUND"
-echo "--- a365 CLI ---"    && a365 --version          2>/dev/null || echo "NOT FOUND"
-echo "--- PowerShell ---"  && pwsh --version          2>/dev/null || echo "NOT FOUND"
-echo "--- Azure CLI ---"   && az version              2>/dev/null | head -2 || echo "NOT FOUND"
-echo "--- Git ---"         && git --version           2>/dev/null || echo "NOT FOUND"
-echo "--- GitHub CLI ---"  && gh --version            2>/dev/null | head -1 || echo "NOT FOUND"
-echo "--- Node.js ---"     && node --version          2>/dev/null || echo "NOT FOUND"
-echo "--- npm ---"         && npm --version           2>/dev/null || echo "NOT FOUND"
-echo "--- Python ---"      && python --version        2>/dev/null || echo "NOT FOUND"
-echo "--- uv ---"          && uv --version            2>/dev/null || echo "NOT FOUND"
-```
+Use the kit's read-only checker instead of issuing a separate tool call for each version. It checks the same prerequisites with at most four subprocesses at once and a 20-second timeout per subprocess.
 
-Also check the Az PowerShell module (requires pwsh to be installed):
+Windows PowerShell:
 
 ```powershell
-pwsh -Command "Get-Module -ListAvailable Az.Accounts | Select-Object -First 1 -ExpandProperty Version"
+node .\.a365-kit\doctor.js --setup --json
 ```
+
+macOS / Linux:
+
+```bash
+node .a365-kit/doctor.js --setup --json
+```
+
+If Node cannot run, offer the platform-specific Node.js 18+ installation in section 1.8 and obtain approval first, then run the checker. A JSON report with exit 1 describes missing required tools: show those rows and offer their existing installation steps below, rather than abandoning the report.
+
+Keep the report in the current onboarding conversation/task context and pass it to delegated skills. Reuse successful rows only within that same run, after the last relevant installation, upgrade or working-directory/tool-environment change (including PATH, DOTNET_ROOT and the user profile). A default launcher report covers fewer tools: use `--setup` once for the complete report. Missing tools must be rechecked after installation; when freshness or context is uncertain, rerun the checker. Do not treat a report from a previous conversation, the detection cache, or a file on disk as current evidence.
+
+The `--setup` profile includes .NET 8+, a365, Azure CLI, Git, PowerShell 7+, Az.Accounts 2+, Node.js 18+, gh, npm, Python 3.11+ and uv. Optional rows still need their existing scope rules: npm is required for Node.js agents, Python for Python agents, gh when cloning a starter, and uv is recommended. Respect any stricter runtime requirement in the project. Read `results`, not just the top-level `ok` flag.
+
+Only read-only tool availability/version results are reusable. The masked sign-in row is informational: Step 2 must still verify the live account and tenant, and downstream operations must still verify current permissions and consent. This report does not authorize installing software or changing tenant state. See NOTICE.md section 21.
 
 Present the results to the user as a summary table showing ✅ (found / version OK) or ❌ (missing or outdated) for each tool.
 
@@ -375,7 +380,11 @@ After install, open a new terminal and run `dotnet --version` to confirm. Report
 
 **Required by:** all `a365` commands.
 
-> **Always run this section** — check current version and update to latest regardless of whether a365 is already installed. This is an explicit exception to the Step 1 "skip ✅ tools" rule.
+> **Install or update on the first setup of each onboarding run.** An installed version alone is not evidence that this happened. This remains an exception to the Step 1 "skip ✅ tools" rule. See NOTICE.md section 21.
+>
+> A delegated skill re-entering setup during the same run may skip another install/update only when the current conversation/task context records the actual successful command (exit 0), its post-command `a365 --version`, and the working directory/tool environment are unchanged. Run `a365 --version` again before reusing that fact; its version must still match. Never infer successful updating from a cached `hasBlueprintConfig`, a version string alone, a failed command, or a record from an earlier conversation.
+>
+> A new top-level onboarding request, an explicit refresh request, changed version/environment, or missing/uncertain evidence requires the normal install/update path below. Preserve installation approvals and error reporting. Record a successful command and its verified version in the current task context, not a persistent trusted cache. Rechecking the CLI does not replace live account, tenant, permission or consent checks.
 
 ```bash
 a365 --version 2>/dev/null || echo "NOT FOUND"
@@ -389,7 +398,7 @@ dotnet tool list -g 2>/dev/null
 dotnet tool install --global Microsoft.Agents.A365.DevTools.Cli
 ```
 
-**If already installed — always update to latest:**
+**If already installed and there is no reusable successful update from this onboarding run — update to latest:**
 
 ```bash
 dotnet tool update --global Microsoft.Agents.A365.DevTools.Cli

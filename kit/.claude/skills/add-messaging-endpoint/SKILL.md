@@ -31,7 +31,7 @@ hooks:
 
 # Add a messaging endpoint (Teams / Copilot reachability)
 
-> **Local revision:** Read `.a365-kit/shared/local-runtime-lessons.md` first.
+> **Kit runtime corrections:** Read `.a365-kit/shared/local-runtime-lessons.md` first.
 > Reuse a prepared `dotnet-agent365-lab` host rather than regenerating it. Never
 > treat a Messaging Bot service-principal token as the human sender. Verify the
 > child identity again after endpoint/publish operations, preserve it in reviewed
@@ -45,7 +45,7 @@ hooks:
 > - "add the hosting layer"
 > - "register the endpoint"
 
-> **This is a kit add-on**, written and verified by the Agent 365 Onboarding Kit against a real tenant on 2026-09-04. It is not one of Microsoft's seven skills. Report issues to the kit repository, not upstream.
+> **This is a kit add-on**, written and verified by the Agent 365 Onboarding Kit against a real tenant on 2026-09-04. It is not one of Microsoft's skills. Report issues to the kit repository, not upstream.
 
 ## Why this exists
 

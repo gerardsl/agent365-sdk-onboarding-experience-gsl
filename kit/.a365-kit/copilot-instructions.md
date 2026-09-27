@@ -4,11 +4,11 @@ Skills for instrumenting and registering Microsoft Agent 365 agents. When a user
 
 ---
 
-## Local revision requirements
+## Kit runtime corrections
 
 Read `.a365-kit/shared/local-runtime-lessons.md` before onboarding, provisioning, hosting or capability changes. Apply its corrections when older snippets below conflict. Never infer a sender identity, license restriction, successful delivery, or a completed integration from an assistant response alone.
 
-> **maven-prod observability consent:** Run setup through `node .a365-kit/run-a365.mjs setup ...` with the same approved arguments. If the CLI says the blueprint needs `maven-prod [Agent365.Observability.OtelWrite]` consent, follow `.a365-kit/shared/observability-access-package.md`: create the access package (Resource=maven-prod, Type=OAuthApplication, Sub Type=API, Role=Agent365.Observability.OtelWrite), create an initial policy, assign the package to that blueprint, and wait for the assignment status **Delivered** before resuming. A policy creation, approval or CLI exit 0 is not completed consent.
+> **maven-prod observability consent:** Running setup through `node .a365-kit/run-a365.mjs setup ...` with the same approved arguments catches this hand-off. If the CLI says the blueprint needs `maven-prod [Agent365.Observability.OtelWrite]` consent, follow the `grant-observability-access` add-on: `node .a365-kit/grant-observability.mjs --check` shows what is missing, then an administrator runs it with `--grant` and confirms. An access package is an optional alternative, in `.a365-kit/shared/observability-access-package.md`. A CLI exit 0 is not completed consent: re-run `--check` until every line reads granted.
 
 ## Quick reference
 
@@ -20,6 +20,7 @@ Read `.a365-kit/shared/local-runtime-lessons.md` before onboarding, provisioning
 | `add-workiq-tools` | Wire MCP servers (Mail / Calendar / Word / etc.) into the agent | — |
 | `instrument-observability` | OTel + A365 tracing exporter wiring | — |
 | `a365-code-validator` | A365 observability/MAC Activity validation with optional guided fixes | — |
+| `purview-dlp-integration` | Add a Purview DLP gate that blocks sensitive prompts before the LLM | — |
 | `test-local` | Launch agent + AgentsPlayground for local smoke test | — |
 
 Skills are designed to be additive, idempotent, and state-aware — re-running is safe.
@@ -27,6 +28,8 @@ Skills are designed to be additive, idempotent, and state-aware — re-running i
 ---
 
 ## Task Execution Discipline
+
+Read `.a365-kit/shared/local-work.md` for change-aware local resume and shared restore/compiler execution. A local fingerprint replaces the old age-only detection rule, but never proves tenant registration or consent. Refresh changed local facts without restarting provisioning; preserve the normal initial setup path when detection metadata is genuinely missing, explicit choices, composite capability checks and all blueprint/authentication approval gates. Record only freshly confirmed classification. Shared compiler receipts never replace feature-specific validation; custom/uncertain work and CI execute fresh. `node .a365-kit/local-work.mjs timings` reports local-operation timings without command arguments, output or credentials. See NOTICE.md section 22.
 
 When a skill creates a task list, run every task to completion in one turn — do not pause
 between phases. Mark each task complete the moment its phase finishes (`TaskUpdate` in
@@ -40,6 +43,7 @@ between phases instead of asking permission.
 - `add-workiq-tools`: MCP server selection; Word @mention offer (only when `mcp_WordServer` is selected and stack is Node.js LangChain).
 - `instrument-observability`: agent kind + auth mode (only if not in cache).
 - `a365-code-validator`: after the report, asks whether to apply safe fixes, create a fix plan, or stop.
+- `purview-dlp-integration`: DLP policy choice (new / existing / skip); agentic auth handler name and app id/display name only when not discoverable from a365 config.
 - `test-local`: confirm before launching.
 
 CLI `Allow / Skip` prompts are the chat client's permission flow — not stopping conditions.
@@ -92,7 +96,7 @@ wrapping.
 2. Asks **capabilities first** (Register, Observability, WorkIQ, AI Teammate) — capability options are **auto-filtered**: Observability is hidden when `has_obs = true`, WorkIQ is hidden when `has_workiq = true`, the menu collapses to Register + WorkIQ when `(has_aiteammate_structure && has_obs)` (the derived "already-an-AI-Teammate" route). Then asks `authMode` (`obo` or `s2s`) **only if AI Teammate was not selected** AND `(has_aiteammate_structure && has_obs)` is false — AI Teammate always uses `agentic-user` (the agent's own M365 identity), no auth mode question needed. If s2s is selected and WorkIQ was also picked, WorkIQ is dropped with a warning.
    - **CEA auto-route:** if `usesTeamsOrCopilot = 1` (Custom Engine Agent), automatically sets all 4 capabilities (Register, Observability, WorkIQ, AI Teammate) without presenting a menu — CEA agents are always AI Teammates
 3. Derives `agentType` from the selection (`isAITeammate = true` → `"ai-teammate"`, else `"system-agent"`); writes `.a365-workspace-detection.local.json` with `agentStack`, `programmingLanguage`, `usesTeamsOrCopilot`, `hasBlueprintConfig`, `has_aiteammate_structure`, `has_obs`, `has_workiq`, `agentType`, `authMode`, `reuseBlueprint`, and `existingBlueprintId`. **`hasAITeammateChanges` is no longer stored — it is derived inline as `has_aiteammate_structure && has_obs` at read sites.** Downstream skills (`instrument-observability`, `add-workiq-tools`, `make-ai-teammate` Phase 0C) read this cache to drive matrix-based routing.
-4. Runs a full system prerequisite scan (parallel version checks) and shows a ✅/❌ summary — **only processes sections for ❌ missing or outdated tools; skips ✅ tools entirely (no reinstall, no re-prompt)**. Exception: the a365 CLI is always updated to latest via `dotnet tool update` regardless of ✅/❌ status. Each install is offered with a platform-specific command (Windows: winget, macOS: brew, Linux: apt) and requires user confirmation.
+4. Runs a full system prerequisite scan (parallel version checks) and shows a ✅/❌ summary — **only processes sections for ❌ missing or outdated tools; skips ✅ tools entirely (no reinstall, no re-prompt)**. Use the complete `doctor.js --setup --json` report and carry successful tool checks forward within the same onboarding run, invalidating them after relevant changes. Exception: the first setup in each run installs or updates the a365 CLI to latest. A delegated re-entry may reuse a successful same-run update only after a fresh version check matches and the tool environment is unchanged; unknown, failed, changed or prior-session evidence requires the normal update path. Live account, tenant, permission and consent checks still run. Each install is offered with a platform-specific command (Windows: winget, macOS: brew, Linux: apt) and requires user confirmation.
 5. Validates Azure CLI login using `az login --allow-no-subscriptions` (plain `az login` fails for accounts with no Azure subscription) and validates Entra ID roles
 6. Delegates to `make-ai-teammate` for the AI Teammate path, or to `make-a365-agent` for all other paths — passes `reuseBlueprint` and `existingBlueprintId` when the developer chose to reuse an existing blueprint
 
@@ -265,7 +269,7 @@ wrapping.
 9. **Final summary calls out MAC visibility expectations:** 15-90 min indexing lag from first export to spans surfacing in `admin.cloud.microsoft → Advanced Hunting → CloudAppEvents`; instance-approval prerequisite; KQL filter MUST use the runtime AUID (`recipient.agenticAppId`), NOT the blueprint id (which `a365 setup all` stamps into `.env` as `agent365Observability__agentId`).
 10. Validates the build passes
 
-**Auth mode note:** All three `authMode` values use an auth handler reference in SDK code — the difference is Azure AD provisioning, not code structure. For .NET OBO: `authHandlerName` comes from config (`AgentApplication:AgenticAuthHandlerName`), not hardcoded. For Node.js OBO: pass `agentApplication.authorization` (the auth object, not a string) to `AgenticTokenCacheInstance.RefreshObservabilityToken`. For Python OBO: use `auth_handler_id=self.auth_handler_name` (from config) in `exchange_token()` — never hardcode `"AGENTIC"`. Agent IDs are always resolved dynamically from TurnContext (`agenticAppId` / `agentic_app_id`), never from config. S2S is supported for .NET, Node.js, and Python.
+**Auth mode note:** All three `authMode` values use an auth handler reference in SDK code — the difference is Azure AD provisioning, not code structure. For .NET OBO: `authHandlerName` comes from config (`AgentApplication:AgenticAuthHandlerName`), not hardcoded. For Node.js OBO: pass `agentApplication.authorization` (the auth object, not a string) to `AgenticTokenCacheInstance.refreshObservabilityToken`. For Python OBO: use `auth_handler_id=self.auth_handler_name` (from config) in `exchange_token()` — never hardcode `"AGENTIC"`. Agent IDs are always resolved dynamically from TurnContext (`agenticAppId` / `agentic_app_id`), never from config. S2S is supported for .NET, Node.js, and Python.
 
 **Prerequisite:** `a365-setup` must be run first. Reads `.a365-workspace-detection.local.json` to skip re-detection.
 
@@ -305,6 +309,42 @@ wrapping.
 
 **Reference checklist:**
 - [.a365-kit/skills/a365-code-validator/references/validation-checklist.md](../.a365-kit/skills/a365-code-validator/references/validation-checklist.md)
+
+---
+
+## Skill: purview-dlp-integration
+
+**Full instructions:** [.a365-kit/skills/purview-dlp-integration/SKILL.md](../.a365-kit/skills/purview-dlp-integration/SKILL.md)
+
+**Trigger phrases:**
+- "add purview dlp to my agent"
+- "add data loss prevention to my a365 agent"
+- "block credit cards / ssns / pii before my agent's llm sees them"
+- "enforce compliance / audit on agent prompts and responses"
+- "wire a dlp gate into my agent code"
+- "call the graph processContent api from my agent"
+- "add purview blocking to my node.js / python / .net agent"
+
+**Summary of what this skill does:**
+1. Auto-discovers app (client) id, display name, blueprint id, tenant id, and current Graph scopes from `a365.config.json` + `a365.generated.config.json`; asks the customer only for what's missing (DLP policy choice, sensitive info type, admin UPN, agentic auth handler name).
+2. Detects the language and authentication: delegated Node.js uses `assets/purview.ts`, Python uses `assets/purview.py`, and .NET uses `assets/purview.cs` (best-effort port). Node.js client-secret FMI S2S uses `assets/purview-s2s.ts`; do not switch managed-identity-only agents to it.
+3. Copies ONE generic, env-driven guard file into the agent source (no edits needed).
+4. Wires an **INPUT gate** before the LLM and optional **output auditing** before the reply. The supplied policy blocks `UploadText`, not sensitive responses; a failed audit withholds the reply in fail-closed mode. Delegated guards use the agent's own auth handler at `/me`; S2S uses the agent identity FMI token at `/users/{sponsor}/...`. Python's snippet returns text for its caller to send; host callbacks must send block/withhold activities explicitly.
+5. Adds missing env keys without duplicating existing values: Node.js/Python use `.env`; .NET uses the process environment or selected `launchSettings.json` profile. Delegated guards auto-read IDs from a365 config; S2S requires the existing canonical `AGENT365_*` credentials and `PURVIEW_SPONSOR_USER_ID`.
+6. Delegated: `scripts/Grant-DelegatedGraphScope.ps1` **appends** `Content.Process.User`. Node.js S2S: `scripts/Grant-ContentProcessAppRole.ps1` grants `Content.Process.All` to the agent identity SP. Never run `az ad app permission admin-consent` on the blueprint app.
+7. **DLP policy choice (new / existing / skip):** creates a dedicated AI-app policy via `scripts/New-AiAppDlpPolicy.ps1` (Applications / Managed-cloud-apps location, `RestrictAccess=Block` on `UploadText`, `EnforcementPlanes=Application`), reuses an existing one (`-ListExisting`), or skips (guard stays wired but logs `allowed … 0 policyAction(s)` until a matching policy exists).
+8. Verifies via the `[purview] uploadText -> BLOCKED (… errors=0)` log — not `DistributionStatus` (reads `Pending` even for live policies). Confirms tenant prerequisites (pay-as-you-go billing + DSPM-for-AI onboarding).
+
+**Non-negotiable constraints:** agentic delegated token + `/me`, or agent identity FMI token + `/users/{sponsor}/...` for Node.js S2S (never a blueprint app-only token); `contentEntry.name` always set + `processingErrors` fail-closed by default; dedicated AI-app policy; input blocking, output audit only; never `admin-consent` the blueprint app; trust the `[purview]` log, not `DistributionStatus`.
+
+**This skill does NOT:** provision the blueprint, run `a365 setup`, install SDK / MSAL / Graph packages (the guard uses the agent's own auth handler + a plain HTTPS POST), or enable tenant billing / DSPM — it surfaces those as manual admin steps.
+
+**Prerequisite:** supported agentic delegated hosting or Node.js client-secret FMI authentication. Manual IDs replace config auto-discovery, not missing authentication. Stop before editing a plain bot without a supported path and route to `a365-setup`.
+
+**Reference patterns:**
+- Guards + wiring: [.a365-kit/skills/purview-dlp-integration/assets/purview.ts](../.a365-kit/skills/purview-dlp-integration/assets/purview.ts) · [purview.py](../.a365-kit/skills/purview-dlp-integration/assets/purview.py) · [purview.cs](../.a365-kit/skills/purview-dlp-integration/assets/purview.cs) · [purview-s2s.ts](../.a365-kit/skills/purview-dlp-integration/assets/purview-s2s.ts)
+- Portal / tenant enablement: [.a365-kit/skills/purview-dlp-integration/references/purview-portal-guide.md](../.a365-kit/skills/purview-dlp-integration/references/purview-portal-guide.md)
+- Troubleshooting: [.a365-kit/skills/purview-dlp-integration/references/troubleshooting.md](../.a365-kit/skills/purview-dlp-integration/references/troubleshooting.md)
 
 ---
 
@@ -367,6 +407,12 @@ All code added by WorkIQ wiring must be marked with the language-appropriate com
 - C# / JavaScript / TypeScript: `// A365 WorkIQ — added by add-workiq-tools skill`
 - Python: `# A365 WorkIQ — added by add-workiq-tools skill`
 
+All best-effort DLP wiring added by `purview-dlp-integration` (notably the .NET port) is marked:
+- C# / JavaScript / TypeScript: `// A365 DLP — best-effort wiring (verify against SDK source before production)`
+- Python: `# A365 DLP — best-effort wiring (verify against SDK source before production)`
+
+The Purview guard files themselves (`purview.ts` / `purview.py` / `purview.cs`) are copied in verbatim — generic and env-driven, no edits needed.
+
 Skills are **additive and idempotent** — never delete or restructure existing agent code.
 
 ## Skill Dependency Chain
@@ -381,5 +427,55 @@ make-ai-teammate  →  instrument-observability  (automatic — part of AI Teamm
 make-a365-agent   →  instrument-observability  (Optional — always offered)
                   →  add-workiq-tools          (Optional — skipped when authMode = s2s)
 
+purview-dlp-integration  (additive — run after the agent has a blueprint; independent of observability / WorkIQ)
+
 test-local  (no prerequisite — works after any step)
 ```
+
+---
+
+## Kit add-ons
+
+These skills ship with the Agent 365 Onboarding Kit, not with Microsoft's skills. When a request matches one of them, follow its SKILL.md exactly.
+
+## Add-on: a365-kit
+
+**Full instructions:** [.a365-kit/addons/a365-kit/SKILL.md](../.a365-kit/addons/a365-kit/SKILL.md)
+
+Maintains the Agent 365 Onboarding Kit itself from inside your coding CLI: check prerequisites, report the installed kit and upstream versions, update the kit in place (only the kit's own files are replaced), and set where updates come from -- the public release or your organisation's own mirror. Use when the user says "update the Agent 365 kit", "check kit prerequisites", "which kit version is this", "set the kit update source", or when the session-start notice says a newer version is available. Kit add-on.
+
+## Add-on: add-java-agent
+
+**Full instructions:** [.a365-kit/addons/add-java-agent/SKILL.md](../.a365-kit/addons/add-java-agent/SKILL.md)
+
+Onboards a Java agent to Agent 365. Microsoft ships no Java SDK, so this builds the three things the SDKs would otherwise provide: an HTTP host serving /api/messages with inbound JWT validation, replies through the Connector API, and a direct OTLP exporter for the Agent 365 observability endpoint. Registration, identity, publishing and the admin-centre steps are language-agnostic and handled by the standard skills -- use those first and this one only for the code. Use when the project is Java (pom.xml or build.gradle) and the user says "onboard this Java agent" or "make this Java agent reachable in Teams". Kit add-on, not part of Microsoft's skills.
+
+## Add-on: add-lab-tools
+
+**Full instructions:** [.a365-kit/addons/add-lab-tools/SKILL.md](../.a365-kit/addons/add-lab-tools/SKILL.md)
+
+Adds local utility tools to an Agent 365 agent -- web fetch and page summarise, text encoders/decoders (base64, hex, url, rot13), hashing (md5/sha1/sha256/sha512), and text transforms (case, regex extract, counts). These are plain in-process function tools, not Work IQ MCP servers: no Entra consent, no tokens, no tenant setup. Use when the user says "add lab tools", "add a URL fetch tool", "let the agent summarise web pages", "add encoders", or wants utility/red-team capabilities beyond the built-in and Work IQ tools. Supports Python, Node.js and .NET. Kit add-on, not part of Microsoft's skills.
+
+## Add-on: add-mcp-server
+
+**Full instructions:** [.a365-kit/addons/add-mcp-server/SKILL.md](../.a365-kit/addons/add-mcp-server/SKILL.md)
+
+Connects an Agent 365 agent to an external / community MCP server -- anything beyond Microsoft's Work IQ set: filesystem, git, GitHub, Postgres/SQLite, web fetch and search, Slack, Playwright browser, memory, time, and any other Model Context Protocol server. Wires it as an stdio (npx/uvx) or streamable-HTTP server on the agent's framework, so its tools appear alongside the built-in, Work IQ and lab tools. Use when the user says "add an MCP server", "connect the filesystem/github/postgres MCP", "give the agent web search", or names any community MCP server. IMPORTANT: this DIRECT connection path does not register servers with Agent 365 or configure its tooling consent -- see the governance section. Supports Python, Node.js and .NET. Kit add-on, not part of Microsoft's skills.
+
+## Add-on: add-messaging-endpoint
+
+**Full instructions:** [.a365-kit/addons/add-messaging-endpoint/SKILL.md](../.a365-kit/addons/add-messaging-endpoint/SKILL.md)
+
+Makes an already-registered, blueprint-based (non-AI-Teammate) Agent 365 agent reachable from Microsoft Teams and Microsoft 365 Copilot. Adds an HTTP hosting layer serving /api/messages (Python aiohttp, Node.js Express, or ASP.NET Core), exposes it through a dev tunnel or a cloud URL, registers the endpoint on the blueprint with `a365 setup blueprint --update-endpoint ... --m365`, and hands off the one step that needs the Windows broker (`a365 setup permissions bot`). Use when the agent was onboarded with make-a365-agent and has no host, when "completed" is false in a365.generated.config.json, or when the user says "make this agent chattable in Teams". Not for AI Teammates -- their hosting layer comes from make-ai-teammate. Kit add-on, not part of Microsoft's skills.
+
+## Add-on: grant-observability-access
+
+**Full instructions:** [.a365-kit/addons/grant-observability-access/SKILL.md](../.a365-kit/addons/grant-observability-access/SKILL.md)
+
+Checks and grants the Agent 365 observability permission (Agent365.Observability.OtelWrite on the Observability API, which some tenants show as "maven-prod") for an onboarded agent: the delegated consent on the blueprint and the application role on the agent identity, and on the blueprint when the agent's exporter signs in with the blueprint's own credentials (Java, Go, Rust, or any client-credentials exporter). Read-only check first; the grant needs an administrator signed in to az, who confirms it. Use when setup says "An administrator must grant the blueprint consent for maven-prod [Agent365.Observability.OtelWrite]", when span export returns 401 or 403, or when the user says "grant observability access", "fix the maven permission" or "the agent's telemetry is not authorised". Kit add-on, not part of Microsoft's skills.
+
+## Add-on: test-local-channel
+
+**Full instructions:** [.a365-kit/addons/test-local-channel/SKILL.md](../.a365-kit/addons/test-local-channel/SKILL.md)
+
+Adds a local dev channel so an agent can be chatted with on the developer's own machine with no tenant, no dev tunnel, no published manifest and no Teams. Covers the blueprint / OBO path, which Microsoft's test-local skill does not: that skill targets AI Teammates. Binds a separate loopback-only port, gated behind A365_DEV_CHANNEL=true and off by default, and leaves the real /api/messages endpoint fully authenticated. Use when the user says "let me test this agent locally", "I can't set up a tunnel", "test without Teams", or is blocked from reaching the tenant. Kit add-on, not part of Microsoft's skills.

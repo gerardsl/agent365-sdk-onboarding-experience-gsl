@@ -10,7 +10,7 @@ internal static class LabTools
 {
     internal const int MaxFetchBytes = 200_000;
     internal static readonly TimeSpan FetchTimeout = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
+    internal static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
     private static readonly HttpClient Http = new(new HttpClientHandler
     {
         AllowAutoRedirect = false,
@@ -177,11 +177,13 @@ internal static class LabTools
         $"characters: {text.Length}  words: {text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length}  lines: {text.Split('\n').Length}";
 
     [Description("Return at most 100 regex matches, one per line. Capturing groups are concatenated. Regex matching has a one-second timeout.")]
-    public static string RegexExtract(string text, string pattern)
+    public static string RegexExtract(string text, string pattern) => RegexExtractCore(text, pattern, RegexTimeout);
+
+    internal static string RegexExtractCore(string text, string pattern, TimeSpan timeout)
     {
         try
         {
-            var matches = Regex.Matches(text, pattern, RegexOptions.None, RegexTimeout)
+            var matches = Regex.Matches(text, pattern, RegexOptions.None, timeout)
                 .Cast<Match>().Take(100)
                 .Select(match => match.Groups.Count > 1
                     ? string.Concat(match.Groups.Cast<Group>().Skip(1).Select(group => group.Value)) : match.Value)

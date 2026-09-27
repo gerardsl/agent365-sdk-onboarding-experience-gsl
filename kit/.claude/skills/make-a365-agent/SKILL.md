@@ -39,9 +39,9 @@ hooks:
 
 # Make A365 Agent
 
-> **maven-prod observability consent:** Run setup through `node .a365-kit/run-a365.mjs setup ...` with the same approved arguments. If the CLI says the blueprint needs `maven-prod [Agent365.Observability.OtelWrite]` consent, follow `.a365-kit/shared/observability-access-package.md`: create the access package (Resource=maven-prod, Type=OAuthApplication, Sub Type=API, Role=Agent365.Observability.OtelWrite), create an initial policy, assign the package to that blueprint, and wait for the assignment status **Delivered** before resuming. A policy creation, approval or CLI exit 0 is not completed consent.
+> **maven-prod observability consent:** Running setup through `node .a365-kit/run-a365.mjs setup ...` with the same approved arguments catches this hand-off. If the CLI says the blueprint needs `maven-prod [Agent365.Observability.OtelWrite]` consent, follow the `grant-observability-access` add-on: `node .a365-kit/grant-observability.mjs --check` shows what is missing, then an administrator runs it with `--grant` and confirms. An access package is an optional alternative, in `.a365-kit/shared/observability-access-package.md`. A CLI exit 0 is not completed consent: re-run `--check` until every line reads granted.
 
-> **Local revision corrections:** Before commands or code edits, read `.a365-kit/shared/local-runtime-lessons.md`. Its verified identity, authentication, transport and verification corrections supersede conflicting older snippets below. Preserve the existing framework and explicit user choices.
+> **Kit runtime corrections:** Before commands or code edits, read `.a365-kit/shared/local-runtime-lessons.md`. Its verified identity, authentication, transport and verification corrections supersede conflicting older snippets below. Preserve the existing framework and explicit user choices.
 
 > **Trigger phrases** — any of these will activate this skill:
 > - "provision this agent with agent 365"
@@ -78,10 +78,9 @@ the session already has `capabilities`, `agentStack`, `programmingLanguage`, and
 
 **If invoked directly (no session context):**
 
-1. **Read** `.a365-workspace-detection.local.json` if it exists and `detectedAt` is within 60 minutes.
-   Load `agentStack`, `programmingLanguage`, and `usesTeamsOrCopilot` from it.
+1. **Read** `.a365-kit/shared/local-work.md` and run `node .a365-kit/local-work.mjs status`. For `unchanged`, load only `agentStack`, `programmingLanguage` and `usesTeamsOrCopilot`. For changed/unrecorded inputs, perform its local-refresh procedure, preserving explicit choices. Missing or invalid metadata requires the normal detection/confirmation work; never invent defaults. Cache age alone does not justify provisioning or skipping blueprint verification.
 
-2. **If no fresh cache**, ask the user in a single message:
+2. **If the current request/session does not already specify capabilities**, ask the user in a single message. Reusing local classification does not authorize capability choices:
 
 ```
 What capabilities would you like to enable? (options can be combined)

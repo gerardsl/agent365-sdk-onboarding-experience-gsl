@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Agent 365 Onboarding Kit -- prerequisite check and per-CLI activation steps.
+# Agent 365 Onboarding Kit: prerequisite check and per-CLI activation steps.
 #
 # Run this from the root of your agent project after extracting the kit into it.
-# The script does not onboard anything itself -- the skills do that. It checks
-# that the kit landed correctly, verifies prerequisites, detects which agentic
-# CLIs you have, and prints the exact steps to load the skills in each one.
+# The skills do the onboarding. This script checks that the kit landed correctly,
+# verifies prerequisites, detects which agentic CLIs you have, and prints the exact
+# steps to load the skills in each one.
 #
 # Usage:
 #   ./agent365-kit.sh                 check prerequisites, print activation steps
@@ -14,18 +14,22 @@
 #   ./agent365-kit.sh --wire-claude-hook  add the optional notice without replacing settings
 #   ./agent365-kit.sh --launch claude launch Claude Code with the trigger phrase
 #   ./agent365-kit.sh --update        replace the kit with the latest release (kit paths only)
-#   ./agent365-kit.sh --update --update-from <zip|url>   ...one-off, from a local zip or another URL
+#   ./agent365-kit.sh --update --update-from <zip|url>   update once from a local zip or another URL
 #   ./agent365-kit.sh --set-update-source <zip|url>      persist the source for this project
 #                                     (a365-kit.config.json; commit it). Empty string clears it.
-#   Source resolution: --update-from > $A365_KIT_UPDATE_SOURCE > a365-kit.config.json
-#                      > build default in .a365-kit/KIT-VERSION.json > public GitHub release
-#   Saved relative paths resolve from the project; one-off/environment paths use the caller's cwd.
+#   The update source is the first of these that is set: --update-from, $A365_KIT_UPDATE_SOURCE,
+#   a365-kit.config.json, the build default in .a365-kit/KIT-VERSION.json, then the public
+#   GitHub release. Saved relative paths resolve from the project; one-off and environment
+#   paths resolve from the caller's working directory.
 
 set -euo pipefail
 
 TRIGGER='Onboard this agent to Agent 365.'
 
-KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Parameter expansion instead of dirname: every extra process is slow under Git Bash on Windows.
+KIT_SCRIPT="${BASH_SOURCE[0]}"
+case "$KIT_SCRIPT" in */*) KIT_SCRIPT_DIR="${KIT_SCRIPT%/*}"; [ -n "$KIT_SCRIPT_DIR" ] || KIT_SCRIPT_DIR=/ ;; *) KIT_SCRIPT_DIR=. ;; esac
+KIT_ROOT="$(cd "$KIT_SCRIPT_DIR" && pwd)"
 
 DOCTOR_ONLY=0
 SKIP_DOCTOR=0
@@ -36,7 +40,7 @@ UPDATE=0
 UPDATE_FROM=''
 SET_UPDATE_SOURCE=''
 SET_UPDATE_SOURCE_GIVEN=0
-PUBLIC_SOURCE='https://github.com/AkramMSFT/agent365-onboarding-kit/releases/latest/download/agent365-onboarding-kit-latest.zip'
+PUBLIC_SOURCE='https://github.com/AkramMSFT/agent365-sdk-onboarding-experience/releases/latest/download/agent365-onboarding-kit-latest.zip'
 KIT_CONFIG="$KIT_ROOT/a365-kit.config.json"
 
 while [ $# -gt 0 ]; do
@@ -61,8 +65,8 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-# -- Update source ------------------------------------------------------------
-# Resolved so an organisation that mirrors the kit internally can pin it once.
+# a365-kit.config.json sits outside the paths --update replaces, so a team that
+# mirrors the kit can set its update source once.
 resolve_update_source() {
   local v
   if [ -n "$UPDATE_FROM" ]; then RESOLVED_SOURCE="$UPDATE_FROM"; SOURCE_ORIGIN='--update-from'; return; fi
@@ -106,15 +110,12 @@ if [ "$SET_UPDATE_SOURCE_GIVEN" -eq 1 ]; then
   exit 0
 fi
 
-# -- 0. Self-update -------------------------------------------------------------
-# Replaces kit paths only; the user's agent, .env, config and .claude/settings.json
-# are never touched. Skill folders to replace come from the NEW kit's manifest
-# (plus the old one's, so a skill upstream removed is removed here too).
-
+# Skill folders to replace come from both the old and the new manifest, so a skill
+# that upstream dropped is removed rather than left behind.
 if [ "$UPDATE" -eq 1 ]; then
-  # Node is a hard prerequisite of the kit (the validators run on it), so it is the
-  # one JSON reader we can rely on. python3 is deliberately NOT used: on Windows it
-  # often resolves to the Store alias stub, which prints an error and returns nothing.
+  # Node is a kit prerequisite, so it is the one JSON reader that is always present.
+  # python3 is avoided: on Windows it often resolves to the Store alias stub, which
+  # prints an error and returns nothing.
   command -v node >/dev/null 2>&1 || { echo "  node is required to read the kit manifest (it is a kit prerequisite)" >&2; exit 1; }
   resolve_update_source; UPDATE_FROM="$RESOLVED_SOURCE"
   echo "  source  : $UPDATE_FROM  [$SOURCE_ORIGIN]"
@@ -156,12 +157,21 @@ if [ "$UPDATE" -eq 1 ]; then
   ZIP="$STAGE/kit.zip"
   if is_http_source "$UPDATE_FROM"; then
     echo "  downloading $UPDATE_FROM"
-    curl -fsSL -o "$ZIP" "$UPDATE_FROM"
+    # curl, then wget, then Node (a kit prerequisite), so minimal Linux images can still update.
+    if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$ZIP" "$UPDATE_FROM"
+    elif command -v wget >/dev/null 2>&1; then wget -q -O "$ZIP" "$UPDATE_FROM"
+    else
+      node -e '
+        fetch(process.argv[1]).then(async response => {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          require("fs").writeFileSync(process.argv[2], Buffer.from(await response.arrayBuffer()));
+        }).catch(error => { console.error("  download failed: " + error.message); process.exit(1); });' "$UPDATE_FROM" "$ZIP"
+    fi
   else
     [ -f "$UPDATE_FROM" ] || { echo "  not found: $UPDATE_FROM" >&2; exit 1; }
     cp "$UPDATE_FROM" "$ZIP"
   fi
-  # Validate the ZIP directory before extraction; an archive is not yet trusted kit content.
+  # The archive is untrusted until its ZIP directory has been checked.
   node - "$ZIP" <<'NODE'
 const fs = require('fs');
 try {
@@ -201,8 +211,48 @@ try {
 } catch (error) { console.error('  ' + error.message); process.exit(1); }
 NODE
   NEW="$STAGE/new"; mkdir -p "$NEW"
+  # GNU tar cannot read zip files, so without unzip the already-validated archive is
+  # extracted by Node, a kit prerequisite. Sizes and CRC-32 are verified per entry.
   if command -v unzip >/dev/null 2>&1; then unzip -q -o "$ZIP" -d "$NEW"
-  else tar -xf "$ZIP" -C "$NEW"; fi          # bsdtar (macOS, Windows 10+) extracts zips
+  else
+    node - "$ZIP" "$NEW" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const zlib = require('zlib');
+try {
+  const [file, out] = process.argv.slice(2);
+  const zip = fs.readFileSync(file);
+  let end = -1;
+  for (let i = zip.length - 22; i >= Math.max(0, zip.length - 65557); i--) {
+    if (zip.readUInt32LE(i) === 0x06054b50 && i + 22 + zip.readUInt16LE(i + 20) === zip.length) { end = i; break; }
+  }
+  if (end < 0) throw new Error('Invalid ZIP archive.');
+  const table = new Int32Array(256).map((_, n) => {
+    for (let k = 0; k < 8; k++) n = n & 1 ? 0xedb88320 ^ (n >>> 1) : n >>> 1;
+    return n;
+  });
+  const crc32 = data => { let c = -1; for (const byte of data) c = table[(c ^ byte) & 0xff] ^ (c >>> 8); return (c ^ -1) >>> 0; };
+  let offset = zip.readUInt32LE(end + 16);
+  for (let remaining = zip.readUInt16LE(end + 10); remaining > 0; remaining--) {
+    const flags = zip.readUInt16LE(offset + 8), method = zip.readUInt16LE(offset + 10);
+    const crc = zip.readUInt32LE(offset + 16), size = zip.readUInt32LE(offset + 20), length = zip.readUInt32LE(offset + 24);
+    const nameLength = zip.readUInt16LE(offset + 28), local = zip.readUInt32LE(offset + 42);
+    const name = zip.subarray(offset + 46, offset + 46 + nameLength).toString('utf8').replace(/\\/g, '/');
+    offset += 46 + nameLength + zip.readUInt16LE(offset + 30) + zip.readUInt16LE(offset + 32);
+    const target = path.join(out, ...name.replace(/\/$/, '').split('/'));
+    if (name.endsWith('/')) { fs.mkdirSync(target, { recursive: true }); continue; }
+    if (flags & 1) throw new Error('Encrypted ZIP entry: ' + name);
+    const start = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28);
+    const raw = zip.subarray(start, start + size);
+    const data = method === 0 ? raw : method === 8 ? zlib.inflateRawSync(raw) : null;
+    if (!data) throw new Error('Unsupported ZIP compression in ' + name);
+    if (data.length !== length || crc32(data) !== crc) throw new Error('Corrupt ZIP entry: ' + name);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, data, { flag: 'wx' });
+  }
+} catch (error) { console.error('  ' + error.message); process.exit(1); }
+NODE
+  fi
   node - "$NEW" "$KIT_ROOT" "$STAGE/plan" <<'NODE'
 const fs = require('fs');
 const path = require('path');
@@ -280,16 +330,20 @@ try {
   fs.writeFileSync(planFile, plan.join('\n') + '\n');
 } catch (error) { console.error('  ' + error.message); process.exit(1); }
 NODE
+  # Parents come from parameter expansion and are created only when missing; a subshell and
+  # extra processes per entry made this loop take seconds under Git Bash on Windows.
   while IFS=$'\t' read -r RELATIVE INSTALL; do
     if [ -e "$KIT_ROOT/$RELATIVE" ]; then
-      mkdir -p "$(dirname "$STAGE/backup/$RELATIVE")"
-      mv "$KIT_ROOT/$RELATIVE" "$STAGE/backup/$RELATIVE"
+      BACKUP="$STAGE/backup/$RELATIVE"
+      [ -d "${BACKUP%/*}" ] || mkdir -p "${BACKUP%/*}"
+      mv "$KIT_ROOT/$RELATIVE" "$BACKUP"
       BACKED_UP+=("$RELATIVE")
     fi
     if [ "$INSTALL" -eq 1 ]; then
-      mkdir -p "$(dirname "$KIT_ROOT/$RELATIVE")"
+      DEST="$KIT_ROOT/$RELATIVE"
+      [ -d "${DEST%/*}" ] || mkdir -p "${DEST%/*}"
       INSTALLED+=("$RELATIVE")
-      mv "$NEW/$RELATIVE" "$KIT_ROOT/$RELATIVE"
+      mv "$NEW/$RELATIVE" "$DEST"
     fi
   done < "$STAGE/plan"
   chmod +x "$KIT_ROOT/agent365-kit.sh"
@@ -316,8 +370,6 @@ cmd_()   { printf '      %s%s%s\n' "$C_BOLD" "$1" "$C_RESET"; }
 printf '\n%sAgent 365 Onboarding Kit%s\n' "$C_BOLD" "$C_RESET"
 printf '%s========================%s\n' "$C_DIM" "$C_RESET"
 
-# -- 1. Confirm the kit landed in the right place -----------------------------
-
 CANONICAL="$KIT_ROOT/.a365-kit/skills/a365-setup/SKILL.md"
 if [ ! -f "$CANONICAL" ]; then
   echo ''
@@ -336,10 +388,19 @@ if [ ! -f "$CANONICAL" ]; then
   exit 1
 fi
 
-SKILL_COUNT="$(find "$KIT_ROOT/.a365-kit/skills" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
+# Counts subdirectories as find -mindepth 1 -maxdepth 1 -type d does (links excluded),
+# without spawning processes.
+count_dirs() {
+  local entry
+  COUNT=0
+  for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+    if [ -d "$entry" ] && [ ! -L "$entry" ]; then COUNT=$((COUNT + 1)); fi
+  done
+}
+count_dirs "$KIT_ROOT/.a365-kit/skills"; SKILL_COUNT=$COUNT
 ADDON_COUNT=0
 if [ -d "$KIT_ROOT/.a365-kit/addons" ]; then
-  ADDON_COUNT="$(find "$KIT_ROOT/.a365-kit/addons" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+  count_dirs "$KIT_ROOT/.a365-kit/addons"; ADDON_COUNT=$COUNT
 fi
 TOTAL_SKILLS="$((SKILL_COUNT + ADDON_COUNT))"
 echo ''
@@ -347,7 +408,12 @@ ok_ "Kit layout looks correct ($TOTAL_SKILLS skills: $SKILL_COUNT Microsoft, $AD
 
 cd "$KIT_ROOT"
 
-# -- 2. Prerequisites ---------------------------------------------------------
+# The gh capability probes run while the prerequisite check does; their results are read later.
+GH_SKILL_PID=''; GH_COPILOT_PID=''
+if [ "$DOCTOR_ONLY" -eq 0 ] && command -v gh >/dev/null 2>&1; then
+  gh skill   --help >/dev/null 2>&1 </dev/null & GH_SKILL_PID=$!
+  gh copilot --help >/dev/null 2>&1 </dev/null & GH_COPILOT_PID=$!
+fi
 
 if [ "$SKIP_DOCTOR" -eq 0 ]; then
   if ! command -v node >/dev/null 2>&1; then
@@ -376,8 +442,6 @@ if [ "$DOCTOR_ONLY" -eq 1 ]; then
   echo ''
   exit 0
 fi
-
-# -- 3. Optional wiring -------------------------------------------------------
 
 if [ "$WIRE_COPILOT" -eq 1 ]; then
   head_ 'Wiring GitHub Copilot instructions'
@@ -420,18 +484,17 @@ if [ "$WIRE_CLAUDE_HOOK" -eq 1 ]; then
   fi
 fi
 
-# -- 4. Detect CLIs and print activation steps --------------------------------
-
 has_claude=0; has_gh_skill=0; has_gh_copilot_launcher=0; has_copilot_cli=0; has_code=0
 command -v claude >/dev/null 2>&1 && has_claude=1
 command -v code   >/dev/null 2>&1 && has_code=1
 
-# `gh skill` and `gh copilot` are built into gh 2.98+, not extensions, and neither
-# supports a read-only --version probe: `gh skill --version` errors, while
-# `gh copilot --version` can download the Copilot CLI. Use gh's own --help only.
+# `gh skill` and `gh copilot` are built into gh 2.98+ and have no safe --version probe:
+# `gh skill --version` errors and `gh copilot --version` can download the Copilot CLI.
 if command -v gh >/dev/null 2>&1; then
-  gh skill   --help >/dev/null 2>&1 && has_gh_skill=1
-  gh copilot --help >/dev/null 2>&1 && has_gh_copilot_launcher=1
+  if [ -n "$GH_SKILL_PID" ]; then wait "$GH_SKILL_PID" && has_gh_skill=1
+  else gh skill --help >/dev/null 2>&1 && has_gh_skill=1; fi
+  if [ -n "$GH_COPILOT_PID" ]; then wait "$GH_COPILOT_PID" && has_gh_copilot_launcher=1
+  else gh copilot --help >/dev/null 2>&1 && has_gh_copilot_launcher=1; fi
 fi
 if command -v copilot >/dev/null 2>&1; then
   has_copilot_cli=1
@@ -463,7 +526,7 @@ echo ''
 
 printf '  %sGitHub Copilot CLI%s\n' "$C_BOLD" "$C_RESET"
 note_ '    Reads .agents/skills/ automatically. From this folder:'
-cmd_ 'gh copilot'
+if [ "$has_copilot_cli" -eq 1 ] || [ "$has_gh_copilot_launcher" -eq 0 ]; then cmd_ 'copilot'; else cmd_ 'gh copilot'; fi
 note_ '    then type the phrase above. For extra grounding, also wire the'
 note_ '    instructions file once:'
 cmd_ './agent365-kit.sh --wire-copilot'
@@ -502,6 +565,8 @@ cmd_ '"Add WorkIQ tools to this agent."'
 note_ '        Microsoft 365 data: mail, calendar, Teams, SharePoint'
 cmd_ '"Validate A365 code."'
 note_ '        read-only check of telemetry, identity binding and grants'
+cmd_ '"Add Purview DLP to my agent."'
+note_ '        Purview blocks sensitive prompts before the model; replies can be audited'
 echo ''
 
 if [ -d "$KIT_ROOT/.a365-kit/addons" ]; then
@@ -509,7 +574,8 @@ if [ -d "$KIT_ROOT/.a365-kit/addons" ]; then
 ' "$C_BOLD" "$C_RESET"
   for addon_dir in "$KIT_ROOT"/.a365-kit/addons/*/; do
     [ -d "$addon_dir" ] || continue
-    addon_name="$(basename "$addon_dir")"
+    addon_dir="${addon_dir%/}"
+    addon_name="${addon_dir##*/}"
     case "$addon_name" in
       add-messaging-endpoint)
         cmd_ '"Make this agent chattable in Teams."'
@@ -523,15 +589,15 @@ if [ -d "$KIT_ROOT/.a365-kit/addons" ]; then
       add-lab-tools)
         cmd_ '"Add lab tools."'
         note_ '        local utilities: web fetch, encoders, hashing, text transforms' ;;
-      add-purview-dlp)
-        cmd_ '"Add DLP to this agent."'
-        note_ '        Purview checks every prompt and response' ;;
       add-java-agent)
         cmd_ '"Onboard this Java agent."'
         note_ '        hosting and telemetry for Java, which has no Microsoft SDK' ;;
       a365-kit)
         cmd_ '"Update the Agent 365 kit."'
         note_ '        replaces only the kit files, never your agent' ;;
+      grant-observability-access)
+        cmd_ '"Grant observability access to this agent."'
+        note_ '        the maven-prod OtelWrite permission; an administrator confirms the grant' ;;
       *)
         cmd_ "\"$addon_name\""
         note_ "        see .a365-kit/addons/$addon_name/SKILL.md" ;;
@@ -545,10 +611,8 @@ note_ 'a365-setup is the entry point. It checks prerequisites, asks which capabi
 note_ 'you want, then hands off to make-ai-teammate or make-a365-agent.'
 note_ 'For consent-aware setup, keep your approved options and use:'
 cmd_ 'node ./.a365-kit/run-a365.mjs setup <subcommand> [options]'
-note_ 'If maven-prod OtelWrite needs admin consent, follow the access-package handoff and wait for Delivered.'
+note_ 'If setup says maven-prod OtelWrite needs admin consent, ask: "Grant observability access to this agent."'
 echo ''
-
-# -- 5. Optional launch -------------------------------------------------------
 
 if [ "$LAUNCH" = 'claude' ]; then
   if [ "$has_claude" -eq 0 ]; then

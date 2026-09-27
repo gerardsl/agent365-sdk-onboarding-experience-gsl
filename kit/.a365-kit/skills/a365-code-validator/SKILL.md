@@ -46,7 +46,7 @@ hooks:
 
 # A365 Code Validator
 
-> **Local revision corrections:** Before commands or code edits, read `.a365-kit/shared/local-runtime-lessons.md`. Its verified identity, authentication, transport and verification corrections supersede conflicting older snippets below. Preserve the existing framework and explicit user choices.
+> **Kit runtime corrections:** Before commands or code edits, read `.a365-kit/shared/local-runtime-lessons.md`. Its verified identity, authentication, transport and verification corrections supersede conflicting older snippets below. Preserve the existing framework and explicit user choices.
 
 > **Trigger phrases** — any of these will activate this skill automatically:
 > - "validate a365 code"

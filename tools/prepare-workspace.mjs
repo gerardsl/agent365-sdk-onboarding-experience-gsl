@@ -69,14 +69,20 @@ export function prepareWorkspace(bundleRoot, { example, destination }) {
     throw new Error('Bundle is missing the kit or selected sample.');
   }
   const destinations = new Set();
+  const checked = new Set();
   const copies = files.map(file => {
     const parts = components(file.path);
     let source = root;
-    for (const part of parts) {
+    for (const part of parts.slice(0, -1)) {
       source = path.join(source, part);
+      if (checked.has(source)) continue;
       if (fs.lstatSync(source).isSymbolicLink()) throw new Error('Bundle source must not contain symbolic links.');
+      checked.add(source);
     }
-    if (!fs.statSync(source).isFile()) throw new Error('Bundle inventory contains a non-file.');
+    source = path.join(source, parts.at(-1));
+    const stat = fs.lstatSync(source);
+    if (stat.isSymbolicLink()) throw new Error('Bundle source must not contain symbolic links.');
+    if (!stat.isFile()) throw new Error('Bundle inventory contains a non-file.');
     const data = fs.readFileSync(source);
     if (data.length !== file.bytes || createHash('sha256').update(data).digest('hex') !== file.sha256) {
       throw new Error(`Bundle integrity check failed: ${file.path}`);
@@ -85,20 +91,23 @@ export function prepareWorkspace(bundleRoot, { example, destination }) {
     const key = relative.join('/').toLowerCase();
     if (destinations.has(key)) throw new Error('Sample files conflict with kit files.');
     destinations.add(key);
-    return { relative, data, mode: fs.statSync(source).mode };
+    return { relative, data, mode: stat.mode };
   });
 
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.mkdirSync(target);
   try {
+    const created = new Set([target]);
     for (const { relative, data, mode } of copies) {
       const output = path.join(target, ...relative);
-      fs.mkdirSync(path.dirname(output), { recursive: true });
-      fs.writeFileSync(output, data, { flag: 'wx', mode });
+      const parent = path.dirname(output);
+      if (!created.has(parent)) { fs.mkdirSync(parent, { recursive: true }); created.add(parent); }
+      // Archives made on Windows drop the executable bit; the macOS/Linux launcher needs it.
+      fs.writeFileSync(output, data, { flag: 'wx', mode: relative.join('/') === 'agent365-kit.sh' ? 0o755 : mode });
     }
     if (!destinations.has('.gitignore')) {
       fs.writeFileSync(path.join(target, '.gitignore'),
-        '.env\n.env.*\n!.env.example\na365.generated.config.json\na365-kit.config.json\n.a365-workspace-detection.local.json\n',
+        '.env\n.env.*\n!.env.example\na365.generated.config.json\n.a365-workspace-detection.local.json\n',
         { flag: 'wx' });
     }
   } catch (error) {

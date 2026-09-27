@@ -153,7 +153,7 @@ if (isDotnet) {
     issues.push('appsettings.json does not contain A365 observability config (EnableAgent365Exporter)');
   }
 
-  // Unified distro selection overrides the legacy root flag (verified with distro 1.0.3).
+  // The unified distro selection overrides the legacy root flag.
   const explicitTargets = hasDistroWired ? csFiles.flatMap(f => {
     try {
       return [...fs.readFileSync(f, 'utf8').matchAll(/\bExporters\s*=\s*((?:ExportTarget\.\w+\s*(?:\|\s*)?)+);/g)]
@@ -162,7 +162,10 @@ if (isDotnet) {
   }) : [];
   const explicitAgent365 = explicitTargets.some(target => /\bExportTarget\.Agent365\b/.test(target));
   const hasExporterKey = anyFileContains(appSettingsFiles, 'EnableAgent365Exporter');
-  const exporterIsOn = appSettingsFiles.some(f => {
+  // Only the root appsettings.json decides the legacy flag. appsettings.Development.json is
+  // meant to be false. Variants are still scanned for the key's presence above.
+  const rootAppSettings = appSettingsFiles.filter(f => /(?:^|[\\/])appsettings\.json$/.test(f));
+  const exporterIsOn = rootAppSettings.some(f => {
     try {
       return /"EnableAgent365Exporter"\s*:\s*true/i.test(fs.readFileSync(f, 'utf8'));
     } catch {
@@ -265,10 +268,9 @@ if (isNodejs) {
     }
   }
 
-  // Kit fix-up: on the OBO path the resolver reads a cache that only
-  // refreshObservabilityToken fills. Without the per-turn call it returns '' forever
-  // and nothing is exported. Also catch the PascalCase name, which is undefined on
-  // the shipped API and throws a TypeError on the first turn.
+  // On the OBO path the resolver reads a cache that only refreshObservabilityToken fills,
+  // so without the per-turn call nothing is exported. The PascalCase name is undefined
+  // and throws on the first turn. See NOTICE.md, section 12.
   if (authMode !== 's2s') {
     const wiresCacheResolver = anyFileContains(tsFiles, 'getObservabilityToken');
     const refreshesPerTurn = anyFileContains(tsFiles, 'refreshObservabilityToken');
@@ -388,10 +390,9 @@ if (isPython) {
     }
   }
 
-  // Kit fix-up: a365_token_resolver must be a SYNC callable. Wiring it straight to
-  // AgenticTokenCache.get_observability_token (async def) hands the exporter an
-  // un-awaited coroutine; a coroutine is truthy, so the exporter's own "no token"
-  // guard misses it and it sends "Bearer <coroutine object ...>".
+  // a365_token_resolver is called synchronously. Wiring it to the async
+  // get_observability_token sends "Bearer <coroutine object ...>", which the exporter's
+  // empty-token check misses because a coroutine is truthy. See NOTICE.md, section 11.
   const asyncResolverFiles = pyFiles.filter(f => {
     try {
       return /a365_token_resolver\s*=\s*[\w.]*\bget_observability_token\b/
@@ -421,20 +422,20 @@ if (isPython) {
 
 // ── Build check ─────────────────────────────────────────────────────────────
 
+// Share only compiler execution; every feature check above still runs. See NOTICE.md section 22.
 function runBuild(cmd, timeoutMs) {
   try {
-    const out = execSync(cmd, { cwd, timeout: timeoutMs, stdio: 'pipe' }).toString();
-    return { ok: true, output: out };
-  } catch (e) {
-    const out = [(e.stdout || '').toString(), (e.stderr || '').toString()].join('\n').trim();
-    return { ok: false, output: out.slice(0, 400) };
+    return require('../../lib/local-work.cjs').runBuild(cmd, timeoutMs, { cwd });
+  } catch (error) {
+    console.error('[local-work] ' + error.message);
+    return { ok: false, output: error.message };
   }
 }
 
 if (!process.env.VALIDATE_SKIP_EXEC) {
   if (isDotnet) {
     const result = runBuild('dotnet build --no-restore -v minimal', 25000);
-    if (!result.ok || !result.output.includes('Build succeeded')) {
+    if (!result.ok) { // The shared helper retains the exit-code and 'Build succeeded' requirements.
       issues.push('dotnet build --no-restore failed — fix compilation errors before ending the session');
     }
   } else if (isNodejs) {

@@ -403,8 +403,10 @@ To avoid re-running globs and greps when multiple skills run in the same session
 
 Before any detection, check for `.a365-workspace-detection.local.json` in the working directory:
 
-- If the file exists and `detectedAt` is within the last **60 minutes**, load `agentStack`, `programmingLanguage`, `usesTeamsOrCopilot`, `agentType`, and `authMode` from it — skip all detection globs and greps.
-- If the file is missing or older than 60 minutes, run full detection as normal.
+- Read `.a365-kit/shared/local-work.md` and run `node .a365-kit/local-work.mjs status`. `unchanged` permits reusing only `agentStack`, `programmingLanguage` and `usesTeamsOrCopilot`; preserve the existing confirmation rules for agent kind/authentication and re-evaluate capability-completeness signals before skipping work.
+- `refresh-required` means changed or unrecorded local inputs, not missing tenant registration. Follow the local-refresh procedure in `local-work.md`, preserve explicit choices and return to the caller. Do not restart provisioning merely because `detectedAt` is old.
+- A genuinely missing detection file still requires the caller's normal initial setup/confirmation flow and the STOP guard below. Check existing blueprint configuration and use the existing reuse/verification gates before any tenant write. A missing local file never proves a blueprint was deleted.
+- If the helper is unavailable, report that reuse is unavailable and perform detection directly; never substitute guessed metadata or cached tenant/consent evidence. See NOTICE.md section 22.
 
 > **🛑 INVARIANT — cache must exist before any code-edit phase.** Every consumer skill
 > (`make-ai-teammate`, `make-a365-agent`, `instrument-observability`, `add-workiq-tools`)
@@ -420,7 +422,7 @@ Before any detection, check for `.a365-workspace-detection.local.json` in the wo
 
 ### Writing the cache (after detection + user confirmation)
 
-The cache is written in stages as values become known — always preserve fields already present.
+The cache is written in stages as values become known — always preserve fields already present. After fresh local detection and its required confirmation, run `node .a365-kit/local-work.mjs record` when the helper is available. It fingerprints only local classification and inputs, never tenant readiness. Never record merely to bless old capability flags; re-evaluate the composite definitions below before making skip decisions. Failed/unavailable receipt storage means future detection runs fresh, not that provisioning must restart.
 
 **Stage 1 — `a365-setup` Phase 1C** (after capabilities selection and `isAITeammate` is set):
 ```json

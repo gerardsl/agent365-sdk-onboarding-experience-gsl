@@ -59,9 +59,9 @@ hooks:
 
 # Instrument A365 Observability
 
-> **maven-prod observability consent:** Run setup through `node .a365-kit/run-a365.mjs setup ...` with the same approved arguments. If the CLI says the blueprint needs `maven-prod [Agent365.Observability.OtelWrite]` consent, follow `.a365-kit/shared/observability-access-package.md`: create the access package (Resource=maven-prod, Type=OAuthApplication, Sub Type=API, Role=Agent365.Observability.OtelWrite), create an initial policy, assign the package to that blueprint, and wait for the assignment status **Delivered** before resuming. A policy creation, approval or CLI exit 0 is not completed consent.
+> **maven-prod observability consent:** Running setup through `node .a365-kit/run-a365.mjs setup ...` with the same approved arguments catches this hand-off. If the CLI says the blueprint needs `maven-prod [Agent365.Observability.OtelWrite]` consent, follow the `grant-observability-access` add-on: `node .a365-kit/grant-observability.mjs --check` shows what is missing, then an administrator runs it with `--grant` and confirms. An access package is an optional alternative, in `.a365-kit/shared/observability-access-package.md`. A CLI exit 0 is not completed consent: re-run `--check` until every line reads granted.
 
-> **Local revision corrections:** Before commands or code edits, read `.a365-kit/shared/local-runtime-lessons.md`. Its verified identity, authentication, transport and verification corrections supersede conflicting older snippets below. Preserve the existing framework and explicit user choices.
+> **Kit runtime corrections:** Before commands or code edits, read `.a365-kit/shared/local-runtime-lessons.md`. Its verified identity, authentication, transport and verification corrections supersede conflicting older snippets below. Preserve the existing framework and explicit user choices.
 
 > **Trigger phrases** — any of these will activate this skill automatically:
 > - "instrument observability for this agent"
@@ -111,7 +111,7 @@ All changes are **additive** and **idempotent** — rerunning the skill is safe.
 Run in parallel:
 
 - **Glob** `**/*.csproj`, `package.json`, `requirements.txt`, `pyproject.toml`, `src/**/*.ts`, `**/*.cs`, `**/*.py` → `hasProjectFiles`.
-- **Read** `.a365-workspace-detection.local.json` → `cacheState` (`fresh` if `detectedAt` < 60 min, `stale` if older, `missing` if absent).
+- **Read** `.a365-kit/shared/local-work.md` and run `node .a365-kit/local-work.mjs status`: `unchanged` means `cacheState = fresh`, `refresh-required` means `stale`, and `missing` means `missing`. Invalid metadata requires local repair; unavailable helper execution requires direct local detection, not guessed defaults. These states never prove tenant readiness.
 
 Decide:
 
@@ -119,7 +119,8 @@ Decide:
 |--------------|-------------------|--------|
 | `fresh`      | —                 | Continue to Step 0.2 below. |
 | `missing` / `stale` | false       | **Hard stop with a useful message:** *"This skill instruments an existing agent for observability — there's no agent code in this workspace yet. Run `/make-ai-teammate` (if this will be a Teams/Copilot agent) or `/make-a365-agent` first to scaffold and register the agent, then come back here."* Do not proceed. |
-| `missing` / `stale` | true        | Tell the user: *"Found existing agent code but no fresh Agent 365 registration. I'll run `a365-setup` now to register it and write the detection cache, then continue here automatically."* **Read** `.a365-kit/skills/a365-setup/SKILL.md` and follow it through completion, then continue to Step 0.2. |
+| `missing` | true        | Tell the user: *"Found existing agent code but no confirmed local detection metadata. I'll run the initial `a365-setup` detection and choice flow, checking existing blueprint configuration before any provisioning, then continue here."* **Read** `.a365-kit/skills/a365-setup/SKILL.md` and follow it through completion, then continue to Step 0.2. |
+| `stale` | true | Follow **Refresh local detection without provisioning** in `.a365-kit/shared/local-work.md`, then continue to Step 0.2. Preserve explicit choices and all later verification gates; do not rerun provisioning merely because local inputs changed or a timestamp is old. |
 
 ### Step 0.2 — Load from cache
 
@@ -211,8 +212,6 @@ The `authMode` value drives Phases 3–5: OBO and S2S paths differ in entry poin
 
 ## Phase 2: Install A365 Observability Packages
 
-> **Python Agents 1.6 teammate profile:** first update and restore the exact AF/hosting/distro manifests in `python-ai-teammate.md`, even if a package with the same name already exists at another version. The generic install table is not permission to upgrade this profile independently. Do not mix its distro 1.2 / OTel 1.40 pins with a different framework's OTel pins.
-
 **TaskCreate** — "Install A365 observability packages"
 
 All languages converge on a single unified distro that re-exports the legacy
@@ -286,29 +285,19 @@ flag live in the references — see the "Required packages" section of:
 
 ### For Python
 
-For the tested **agentic-user / Agents 1.6** profile, generate or migrate the one
-`observability_tokens.py` and `observability_bootstrap.py` pair from the Python
-reference. Import `token_resolver` from that shared module; do not instantiate
-`AgenticTokenCache` in another file or import the host as `__main__`.
-Call `configure_observability()` before importing LLM modules.
+1. **Read** the current entry point (`app.py`, `host_agent_server.py`, or detected file).
 
-Wire startup, every appropriate turn and cleanup as in the complete
-`GenericAgentHost`: bind the actual running loop; register the current context,
-`app.auth` and configured handler; flush providers on a worker while the loop
-is still live; then close/drain the store.
+2. **Edit** — Add observability configuration following the reference pattern in `python-observability.md`:
+   - Import `use_microsoft_opentelemetry` from `microsoft.opentelemetry` (single unified package; do NOT import from the legacy `microsoft_agents_a365.*` namespace).
+   - **OBO / agentic-user path**: Call `use_microsoft_opentelemetry(enable_a365=True, a365_enable_observability_exporter=True, a365_token_resolver=...)`. Both `enable_a365=True` AND `a365_enable_observability_exporter=True` are required in 1.0+ to actually export spans. Wire `a365_token_resolver` to a **synchronous** callable. Do NOT pass `AgenticTokenCache().get_observability_token` directly: it is `async def`, and the exporter calls the resolver synchronously from its own batch-export thread, so it receives an un-awaited coroutine. A coroutine object is truthy, so the exporter's "no token" guard does not catch it and it sends the literal string `Bearer <coroutine object ...>`; the service then rejects every export with `EndpointInvalid` / "Tenant id  is invalid" (the blank tenant means unreadable, not missing from config). Use the `run_coroutine_threadsafe` bridge shown in the OBO section of `.a365-kit/skills/instrument-observability/references/python-observability.md`, capturing the running loop in the same per-turn handler you wrap with `InvokeAgentScope`. A custom resolver reading from `token_cache.py` is also fine as long as it is sync.
+   - **S2S path**: First **Write** `observability/token_cache.py` (in-memory token cache with `cache_token`/`get_cached_token`) and `observability/observability_token_service.py` using the scaffold pattern from `python-observability.md` (S2S section). This module acquires the Observability API token via a 3-hop FMI chain: direct HTTP POST with `fmi_path` for Hops 1+2 (MSAL Python does not properly serialize `fmi_path` — known limitation), then `msal.ConfidentialClientApplication` for Hop 3, targeting scope `api://9b975845-388f-4429-889e-eab1ef63949c/.default`, supports MSI with client-secret fallback, refreshes every 50 min via an `asyncio` background task. Then call `use_microsoft_opentelemetry(enable_a365=True, a365_enable_observability_exporter=True, a365_use_s2s_endpoint=True, a365_token_resolver=...)`. `a365_use_s2s_endpoint=True` is now a first-class kwarg — no workaround needed. Schedule `run_token_service()` as an asyncio task and call `acquire_initial_token()` in your aiohttp lifespan startup. Also install `msal`, `azure-identity`, and `httpx`.
+   - **Both paths**: Call `ObservabilityHostingManager.configure(adapter.middleware_set, ObservabilityHostingOptions(enable_baggage=True))` once at startup to auto-populate baggage from `TurnContext`. **Note:** `enable_baggage` defaults to `False` — must be explicitly set to `True`.
+   - **Auto-instrumentation note**: Do NOT call legacy `*Instrumentor().instrument()` methods for LangChain/OpenAI/SK/AgentFramework — these are auto-enabled in 1.0+ and manual calls cause duplicate spans.
+   - Mark all new lines with: `# A365 Observability — best-effort instrumentation (verify against official sample)`
 
-Register `Agents16BaggageMiddleware` once. Raw distro 1.2 middleware uses a
-zero-argument next callback and cannot be registered directly on Agents 1.6.
-Do not additionally install `ObservabilityHostingManager`'s raw middleware.
-For offline runs set exporter=false and `MICROSOFT_OTEL_SDKSTATS_DISABLED=true`.
+3. **Preserve** all existing code — only add new lines, never remove.
 
-Ordinary OBO without validated runtime IDs is not certified by this teammate
-fixture. Preserve a separately verified implementation or stop that migration;
-never invent an agent ID from the blueprint. S2S uses the separate S2S token
-service/reference and must not be replaced by this turn-bound store.
-Preserve user business logic and valid existing scopes, but replace the
-disconnected/undefined cache wiring as one coherent change rather than retaining
-both incompatible implementations. Mark complete only after behavior checks.
+4. **TaskUpdate** — Mark complete.
 
 ---
 
@@ -436,36 +425,50 @@ both incompatible implementations. Mark complete only after behavior checks.
 
 ### For Python
 
-For the tested teammate profile, the host owns token registration, not the LLM
-client class. Use the complete host `_register_turn(context)` method and invoke
-it after route sign-in on every message, notification and supported lifecycle
-turn. It registers into the same `observability_tokens.TOKEN_STORE` read by the
-exporter. Use the configured `AUTH_HANDLER_NAME` and the real `app.auth`.
+1. **Read** the detected message handler file AND `host_agent_server.py` — the helper lives in the HOST file, not the agent class. The verified AF sample places `_setup_observability_token` in `host_agent_server.py:130-156` so it has access to the `AgentApplication` instance and can be called by activity middleware. Per-turn baggage construction also lives in the handler/middleware layer in `host_agent_server.py`, NOT in `agent.py`.
 
-Registration and baggage must use the same runtime agent/tenant IDs. The store
-calls the distro's explicit observability scope helper during exchange; the
-auth handler's Graph default scopes are not an observability default.
-Do not generate `from token_cache import cache_agentic_token`, an undefined
-`self` decorator, or an independent SDK cache. Do not skip the producer merely
-because baggage middleware exists.
+2. **Edit `host_agent_server.py`** (the host file) — Refresh the per-turn exporter token following the reference pattern in `python-observability.md`:
+   - Default observability scope is auto-applied by `microsoft-opentelemetry` 1.1+ — do **not** import `get_observability_authentication_scope` unless you need to override the default. If overriding, pass via `a365_observability_scope_override` to `use_microsoft_opentelemetry`. The `exchange_token()` call below omits `scopes=` and lets the auth handler resolve the default.
+   - Import `cache_agentic_token` from `token_cache` (the custom module created in Phase 5) — or use `AgenticTokenCache` from the hosting helpers.
+   - **OBO paths only** (`obo` / `agentic-user`): Resolve `agent_id` and `tenant_id` dynamically from context each turn (never from config), then exchange the OBO token (non-fatal, wrap in try/except):
+     ```python
+     agent_id  = context.activity.recipient.agentic_app_id
+     tenant_id = context.activity.recipient.tenant_id
+     await self._setup_observability_token(context, tenant_id, agent_id)
+     ```
+     The `_setup_observability_token` helper exchanges and caches the token:
+     ```python
+     async def _setup_observability_token(self, context, tenant_id, agent_id):
+         exaau_token = await self.agent_app.auth.exchange_token(
+             context,
+             scopes=get_observability_authentication_scope(),
+             auth_handler_id=self.auth_handler_name  # from config — NOT hardcoded "AGENTIC"
+         )
+         cache_agentic_token(tenant_id, agent_id, exaau_token.token)
+     ```
+     - `auth_handler_name` must come from config (e.g., `AgentApplication:AgenticAuthHandlerName`) — **never hardcode `"AGENTIC"`**; it is the registered auth handler name in your agent setup.
+     - `agentic-user` (AI Teammate): the exchange returns a token for the **agent's own Agentic User** identity → traces attribute to the agent
+     - `obo` (non-AI Teammate): the exchange returns whatever the configured auth handler resolves — typically the **signed-in user**, but it can also be the agent's own identity if the handler is configured that way
+   - **S2S path**: Do **NOT** call `_setup_observability_token` — token comes from the background token service wired in Phase 3. The handler should NOT touch tokens.
+   - **Baggage:** No manual baggage construction in the handler. Phase 3 registered `ObservabilityHostingManager.configure(adapter.middleware_set, ObservabilityHostingOptions(enable_baggage=True))` which auto-populates baggage from `TurnContext` for every request. (Optional fallback if you skipped that: build manually with `populate(builder, context)` then `with builder.build():`.)
+   - Add inline comment: `# A365 auth mode: {authMode} — see: https://learn.microsoft.com/en-us/entra/agent-id/agent-on-behalf-of-oauth-flow`
+   - Mark all new lines with: `# A365 Observability — best-effort instrumentation (verify against official sample)`
 
-For S2S preserve its separate service. Non-agentic OBO without a verified
-runtime identity and usable authorization context is outside this fixture's
-certification and must not silently borrow a blueprint ID.
+3. **Preserve** all existing handler logic.
+
+4. **TaskUpdate** — Mark complete.
 
 ---
 
 ## Phase 5: Implement Agentic Token Resolver
 
-> **Python exception to any generic auto-cache guidance below:** distro 1.2 does not connect an arbitrary handler's custom cache automatically. The Agents 1.6 teammate profile requires the one explicit producer/consumer module and live-loop lifecycle shown in its Python subsection.
-
 **TaskCreate** — "Implement agentic token resolver with caching"
 
-For OBO/agentic-user agents, verify one shared token-cache contract rather than assuming the distro wires it. .NET requires explicit cache DI registration and `o.Agent365.TokenResolver`; Node.js and Python require the resolver and producer documented in their selected reference. Baggage middleware does not replace token wiring.
+For AI Teammate agents and Standard agents on the OBO/agentic-user path, the built-in token cache handles caching automatically — no custom resolver needed. With the **`Microsoft.OpenTelemetry` distro** the cache is registered explicitly in Phase 3 (`AddSingleton<IExporterTokenCache<AgenticTokenStruct>, AgenticTokenCache>()`); `UseMicrosoftOpenTelemetry(...)` does not register it. With the **legacy individual packages** it's registered explicitly via `AddAgenticTracingExporter` (.NET), `AgenticTokenCacheInstance` (Node.js), or `AgenticTokenCache` (Python). Skip to step 3 for these agents.
 
 ### For .NET AgentFramework (hosting path)
 
-1. Verify Phase 3 explicitly registered `IExporterTokenCache<AgenticTokenStruct>` with `AgenticTokenCache` and connected `o.Agent365.TokenResolver` to that same DI instance. A distro call alone is insufficient in 1.0.3. Do not introduce a second cache in this phase.
+1. Phase 3 registers `IExporterTokenCache<AgenticTokenStruct>` explicitly with `builder.Services.AddSingleton<IExporterTokenCache<AgenticTokenStruct>, AgenticTokenCache>()` and points `o.Agent365.TokenResolver` at the same instance. `builder.UseMicrosoftOpenTelemetry(...)` alone does not register it (checked against `Microsoft.OpenTelemetry` 1.0.3 and 1.0.7). If you're on the legacy two-package wiring, `AddAgenticTracingExporter()` provides the same DI instance.
 
 2. In the agent class, inject `IExporterTokenCache<AgenticTokenStruct>` in the constructor and call `RegisterObservability(...)` per turn (already done in Phase 4).
 
@@ -487,15 +490,9 @@ The `ObservabilityTokenService` background service (created in Phase 3 via the s
 
 **If absent** (Phase 3 was skipped or re-running), create `observability/token-cache.ts` and `observability/observability-token-service.ts` now using the scaffold from `nodejs-observability.md` (S2S section). The token service uses MSAL (`@azure/msal-node`) with `fmiPath` to acquire tokens via the FMI 3-hop chain targeting scope `api://9b975845-388f-4429-889e-eab1ef63949c/.default`. Call `startTokenService(config)` at app startup and pass `tokenResolver` from the cache module to `useMicrosoftOpenTelemetry()`.
 
-### For Python (agentic-user teammate profile)
+### For Python (OBO path)
 
-Verify that there is exactly one shared store module and that all three ends
-are connected: `TOKEN_STORE.bind_loop()` in async startup,
-`TOKEN_STORE.register_turn(...)` on each authenticated business turn, and
-`a365_token_resolver=token_resolver` imported from that module. Verify cleanup
-while the loop is live and offline resolver success, replacement, timeout and
-cancellation behavior. Do not create `token_cache.py` with a different producer
-or mark this phase complete on import checks alone.
+The `token_cache.py` custom module (located at project root or `observability/token_cache.py`) provides `cache_agentic_token` and `get_cached_agentic_token`. The `a365_token_resolver` in `use_microsoft_opentelemetry()` (Phase 3) is wired to `get_cached_agentic_token`. The per-turn `_setup_observability_token` helper (Phase 4) calls `cache_agentic_token` after each OBO exchange. If `token_cache.py` is absent (e.g., this phase is reached before Phase 4 ran), create it now following the OBO token cache pattern in `python-observability.md`.
 
 ### For Python (S2S path)
 
@@ -714,7 +711,7 @@ placeholder values to match `.env`.
 
 1. **Bash** — Run:
    ```bash
-   dotnet build
+   node .a365-kit/local-work.mjs run dotnet-restore && node .a365-kit/local-work.mjs run dotnet-build
    ```
 
 2. **If build fails**, collect error output and present to user with suggested fixes.
@@ -725,11 +722,11 @@ placeholder values to match `.env`.
 
 1. **Bash** — Run:
    ```bash
-   npm install   # Ensure new packages are installed
+   node .a365-kit/local-work.mjs run npm-install || exit $?
    if node -e 'process.exit(require("./package.json").scripts?.build ? 0 : 1)'; then
-     npm run build || exit $?
+     node .a365-kit/local-work.mjs run node-build || exit $?
    elif node -e 'process.exit(require("./package.json").scripts?.compile ? 0 : 1)'; then
-     npm run compile || exit $?
+     node .a365-kit/local-work.mjs run node-build || exit $?
    else
      echo "No build/compile script found - skipping compile check"
    fi
@@ -743,7 +740,7 @@ placeholder values to match `.env`.
 
 1. **Bash** — Run an import check to verify the package loads without errors:
    ```bash
-   python -c "from observability_bootstrap import Agents16BaggageMiddleware; from observability_tokens import TOKEN_STORE, token_resolver; assert token_resolver.__self__ is TOKEN_STORE; print('Shared Python observability modules import OK')"
+   python3 -c "from microsoft.opentelemetry import use_microsoft_opentelemetry; from microsoft.opentelemetry.a365.hosting import ObservabilityHostingManager; print('A365 observability imports OK')" 2>/dev/null || python -c "from microsoft.opentelemetry import use_microsoft_opentelemetry; from microsoft.opentelemetry.a365.hosting import ObservabilityHostingManager; print('A365 observability imports OK')"
    ```
 
 2. **If import fails**, collect error output and present to user with suggested fixes (usually a missing `pip install`).
@@ -823,7 +820,7 @@ Without this phase the skill ends "instrumented successfully" but the user has n
    **Files modified:** [list files]
 
    **Next steps:**
-   1. Confirm the exporter is still on -- this skill sets it, but a later
+   1. Confirm the exporter is still on. This skill sets it, but a later
       `a365 setup` run can reset it to false:
       - .NET: set EnableAgent365Exporter: true in appsettings.json
       - Node.js / Python: set ENABLE_A365_OBSERVABILITY_EXPORTER=true in .env (or `a365.enableObservabilityExporter: true` in code — both required alongside `a365.enabled: true`)

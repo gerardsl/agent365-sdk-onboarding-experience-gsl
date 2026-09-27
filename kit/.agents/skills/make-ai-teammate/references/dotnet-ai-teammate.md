@@ -64,274 +64,6 @@ Patterns in this reference are validated against these specific versions. NuGet 
 
 ---
 
-## AspNetExtensions.cs — Shared Authentication Helper
-
-Generate this file for both .NET variants before building. `AddAgentAspNetAuthentication` is a sample-local extension, not an SDK extension. Replace `YourNamespace` consistently with the selected project namespace. Source: https://github.com/microsoft/Agent365-Samples/blob/87dca88dfc73bc386f6a93602f911ef112231976/dotnet/agent-framework/sample-agent/AspNetExtensions.cs (MIT; copyright retained).
-
-```csharp
-// Copyright (c) Microsoft Corporation. All rights reserved.
-// Licensed under the MIT License.
-
-using Microsoft.Agents.Authentication;
-using Microsoft.Agents.Core;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Protocols;
-using Microsoft.IdentityModel.Protocols.OpenIdConnect;
-using Microsoft.IdentityModel.Tokens;
-using Microsoft.IdentityModel.Validators;
-using System.Collections.Concurrent;
-using System.Globalization;
-using System.IdentityModel.Tokens.Jwt;
-
-namespace YourNamespace;
-
-public static class AspNetExtensions
-{
-    private static readonly ConcurrentDictionary<string, ConfigurationManager<OpenIdConnectConfiguration>> _openIdMetadataCache = new();
-
-    /// <summary>
-    /// Adds token validation typical for ABS/SMBA and Bot-to-bot.
-    /// default to Azure Public Cloud.
-    /// </summary>
-    /// <param name="services"></param>
-    /// <param name="configuration"></param>
-    /// <param name="tokenValidationSectionName">Name of the config section to read.</param>
-    /// <param name="logger">Optional logger to use for authentication event logging.</param>
-    /// <remarks>
-    /// Configuration:
-    /// <code>
-    ///   "TokenValidation": {
-    ///     "Audiences": [
-    ///       "{required:bot-appid}"
-    ///     ],
-    ///     "TenantId": "{recommended:tenant-id}",
-    ///     "ValidIssuers": [
-    ///       "{default:Public-AzureBotService}"
-    ///     ],
-    ///     "IsGov": {optional:false},
-    ///     "AzureBotServiceOpenIdMetadataUrl": optional,
-    ///     "OpenIdMetadataUrl": optional,
-    ///     "AzureBotServiceTokenHandling": "{optional:true}"
-    ///     "OpenIdMetadataRefresh": "optional-12:00:00"
-    ///   }
-    /// </code>
-    ///
-    /// `IsGov` can be omitted, in which case public Azure Bot Service and Azure Cloud metadata urls are used.
-    /// `ValidIssuers` can be omitted, in which case the Public Azure Bot Service issuers are used.
-    /// `TenantId` can be omitted if the Agent is not being called by another Agent.  Otherwise it is used to add other known issuers.  Only when `ValidIssuers` is omitted.
-    /// `AzureBotServiceOpenIdMetadataUrl` can be omitted.  In which case default values in combination with `IsGov` is used.
-    /// `OpenIdMetadataUrl` can be omitted.  In which case default values in combination with `IsGov` is used.
-    /// `AzureBotServiceTokenHandling` defaults to true and should always be true until Azure Bot Service sends Entra ID token.
-    /// </remarks>
-    public static void AddAgentAspNetAuthentication(this IServiceCollection services, IConfiguration configuration, string tokenValidationSectionName = "TokenValidation")
-    {
-        IConfigurationSection tokenValidationSection = configuration.GetSection(tokenValidationSectionName);
-
-        if (!tokenValidationSection.Exists())
-        {
-            throw new InvalidOperationException("TokenValidation configuration is required for the authenticated messaging endpoint.");
-        }
-        // A CLI-generated Enabled=false flag must not disable messaging authentication.
-
-        services.AddAgentAspNetAuthentication(tokenValidationSection.Get<TokenValidationOptions>()!);
-    }
-
-    /// <summary>
-    /// Adds AspNet token validation typical for ABS/SMBA and agent-to-agent.
-    /// </summary>
-    public static void AddAgentAspNetAuthentication(this IServiceCollection services, TokenValidationOptions validationOptions)
-    {
-        AssertionHelpers.ThrowIfNull(validationOptions, nameof(validationOptions));
-
-        // Must have at least one Audience.
-        if (validationOptions.Audiences == null || validationOptions.Audiences.Count == 0)
-        {
-            throw new ArgumentException($"{nameof(TokenValidationOptions)}:Audiences requires at least one ClientId");
-        }
-
-        // Audience values must be GUID's
-        foreach (var audience in validationOptions.Audiences)
-        {
-            if (!Guid.TryParse(audience, out _))
-            {
-                throw new ArgumentException($"{nameof(TokenValidationOptions)}:Audiences values must be a GUID");
-            }
-        }
-
-        // If ValidIssuers is empty, default for ABS Public Cloud
-        if (validationOptions.ValidIssuers == null || validationOptions.ValidIssuers.Count == 0)
-        {
-            validationOptions.ValidIssuers =
-            [
-                "https://api.botframework.com",
-                "https://sts.windows.net/d6d49420-f39b-4df7-a1dc-d59a935871db/",
-                "https://login.microsoftonline.com/d6d49420-f39b-4df7-a1dc-d59a935871db/v2.0",
-                "https://sts.windows.net/f8cdef31-a31e-4b4a-93e4-5f571e91255a/",
-                "https://login.microsoftonline.com/f8cdef31-a31e-4b4a-93e4-5f571e91255a/v2.0",
-                "https://sts.windows.net/69e9b82d-4842-4902-8d1e-abc5b98a55e8/",
-                "https://login.microsoftonline.com/69e9b82d-4842-4902-8d1e-abc5b98a55e8/v2.0",
-            ];
-
-            if (!string.IsNullOrEmpty(validationOptions.TenantId) && Guid.TryParse(validationOptions.TenantId, out _))
-            {
-                validationOptions.ValidIssuers.Add(string.Format(CultureInfo.InvariantCulture, AuthenticationConstants.ValidTokenIssuerUrlTemplateV1, validationOptions.TenantId));
-                validationOptions.ValidIssuers.Add(string.Format(CultureInfo.InvariantCulture, AuthenticationConstants.ValidTokenIssuerUrlTemplateV2, validationOptions.TenantId));
-            }
-        }
-
-        // If the `AzureBotServiceOpenIdMetadataUrl` setting is not specified, use the default based on `IsGov`.  This is what is used to authenticate ABS tokens.
-        if (string.IsNullOrEmpty(validationOptions.AzureBotServiceOpenIdMetadataUrl))
-        {
-            validationOptions.AzureBotServiceOpenIdMetadataUrl = validationOptions.IsGov ? AuthenticationConstants.GovAzureBotServiceOpenIdMetadataUrl : AuthenticationConstants.PublicAzureBotServiceOpenIdMetadataUrl;
-        }
-
-        // If the `OpenIdMetadataUrl` setting is not specified, use the default based on `IsGov`.  This is what is used to authenticate Entra ID tokens.
-        if (string.IsNullOrEmpty(validationOptions.OpenIdMetadataUrl))
-        {
-            validationOptions.OpenIdMetadataUrl = validationOptions.IsGov ? AuthenticationConstants.GovOpenIdMetadataUrl : AuthenticationConstants.PublicOpenIdMetadataUrl;
-        }
-
-        var openIdMetadataRefresh = validationOptions.OpenIdMetadataRefresh ?? BaseConfigurationManager.DefaultAutomaticRefreshInterval;
-
-        _ = services.AddAuthentication(options =>
-        {
-            options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-            options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-        })
-        .AddJwtBearer(options =>
-        {
-            options.SaveToken = true;
-            options.TokenValidationParameters = new TokenValidationParameters
-            {
-                ValidateIssuer = true,
-                ValidateAudience = true,
-                ValidateLifetime = true,
-                ClockSkew = TimeSpan.FromMinutes(5),
-                ValidIssuers = validationOptions.ValidIssuers,
-                ValidAudiences = validationOptions.Audiences,
-                ValidateIssuerSigningKey = true,
-                RequireSignedTokens = true,
-            };
-
-            // Using Microsoft.IdentityModel.Validators
-            options.TokenValidationParameters.EnableAadSigningKeyIssuerValidation();
-
-            options.Events = new JwtBearerEvents
-            {
-                // Create a ConfigurationManager based on the requestor.  This is to handle ABS non-Entra tokens.
-                OnMessageReceived = async context =>
-                {
-                    string authorizationHeader = context.Request.Headers.Authorization.ToString();
-
-                    if (string.IsNullOrEmpty(authorizationHeader))
-                    {
-                        // Default to AadTokenValidation handling
-                        context.Options.TokenValidationParameters.ConfigurationManager ??= options.ConfigurationManager as BaseConfigurationManager;
-                        await Task.CompletedTask.ConfigureAwait(false);
-                        return;
-                    }
-
-                    string[] parts = authorizationHeader?.Split(' ')!;
-                    if (parts.Length != 2 || parts[0] != "Bearer")
-                    {
-                        // Default to AadTokenValidation handling
-                        context.Options.TokenValidationParameters.ConfigurationManager ??= options.ConfigurationManager as BaseConfigurationManager;
-                        await Task.CompletedTask.ConfigureAwait(false);
-                        return;
-                    }
-
-                    JwtSecurityToken token = new(parts[1]);
-                    string issuer = token.Claims.FirstOrDefault(claim => claim.Type == AuthenticationConstants.IssuerClaim)?.Value!;
-
-                    if (validationOptions.AzureBotServiceTokenHandling && AuthenticationConstants.BotFrameworkTokenIssuer.Equals(issuer))
-                    {
-                        // Use the Azure Bot authority for this configuration manager
-                        context.Options.TokenValidationParameters.ConfigurationManager = _openIdMetadataCache.GetOrAdd(validationOptions.AzureBotServiceOpenIdMetadataUrl, key =>
-                        {
-                            return new ConfigurationManager<OpenIdConnectConfiguration>(validationOptions.AzureBotServiceOpenIdMetadataUrl, new OpenIdConnectConfigurationRetriever(), new HttpClient())
-                            {
-                                AutomaticRefreshInterval = openIdMetadataRefresh
-                            };
-                        });
-                    }
-                    else
-                    {
-                        context.Options.TokenValidationParameters.ConfigurationManager = _openIdMetadataCache.GetOrAdd(validationOptions.OpenIdMetadataUrl, key =>
-                        {
-                            return new ConfigurationManager<OpenIdConnectConfiguration>(validationOptions.OpenIdMetadataUrl, new OpenIdConnectConfigurationRetriever(), new HttpClient())
-                            {
-                                AutomaticRefreshInterval = openIdMetadataRefresh
-                            };
-                        });
-                    }
-
-                    await Task.CompletedTask.ConfigureAwait(false);
-                },
-
-                OnTokenValidated = context =>
-                {
-                    return Task.CompletedTask;
-                },
-                OnForbidden = context =>
-                {
-                    return Task.CompletedTask;
-                },
-                OnAuthenticationFailed = context =>
-                {
-                    return Task.CompletedTask;
-                }
-            };
-        });
-    }
-
-    public class TokenValidationOptions
-    {
-        public IList<string>? Audiences { get; set; }
-
-        /// <summary>
-        /// TenantId of the Azure Bot.  Optional but recommended.
-        /// </summary>
-        public string? TenantId { get; set; }
-
-        /// <summary>
-        /// Additional valid issuers.  Optional, in which case the Public Azure Bot Service issuers are used.
-        /// </summary>
-        public IList<string>? ValidIssuers { get; set; }
-
-        /// <summary>
-        /// Can be omitted, in which case public Azure Bot Service and Azure Cloud metadata urls are used.
-        /// </summary>
-        public bool IsGov { get; set; } = false;
-
-        /// <summary>
-        /// Azure Bot Service OpenIdMetadataUrl.  Optional, in which case default value depends on IsGov.
-        /// </summary>
-        /// <see cref="AuthenticationConstants.PublicAzureBotServiceOpenIdMetadataUrl"/>
-        /// <see cref="AuthenticationConstants.GovAzureBotServiceOpenIdMetadataUrl"/>
-        public string? AzureBotServiceOpenIdMetadataUrl { get; set; }
-
-        /// <summary>
-        /// Entra OpenIdMetadataUrl.  Optional, in which case default value depends on IsGov.
-        /// </summary>
-        /// <see cref="AuthenticationConstants.PublicOpenIdMetadataUrl"/>
-        /// <see cref="AuthenticationConstants.GovOpenIdMetadataUrl"/>
-        public string? OpenIdMetadataUrl { get; set; }
-
-        /// <summary>
-        /// Determines if Azure Bot Service tokens are handled.  Defaults to true and should always be true until Azure Bot Service sends Entra ID token.
-        /// </summary>
-        public bool AzureBotServiceTokenHandling { get; set; } = true;
-
-        /// <summary>
-        /// OpenIdMetadata refresh interval.  Defaults to 12 hours.
-        /// </summary>
-        public TimeSpan? OpenIdMetadataRefresh { get; set; }
-    }
-}
-```
-
----
-
 ## Program.cs — Startup / Service Registration
 
 ```csharp
@@ -341,7 +73,6 @@ public static class AspNetExtensions
 using YourNamespace;
 using YourNamespace.Agent;
 using Microsoft.Agents.Builder;
-using Microsoft.Agents.Builder.App;
 using Microsoft.Agents.Hosting.AspNetCore;
 using Microsoft.Agents.Storage;
 using Microsoft.Agents.Storage.Transcript;
@@ -541,6 +272,10 @@ namespace YourNamespace.Agent
         private readonly IChatClient? _chatClient;
         private readonly IMcpToolRegistrationService _toolService;
         private readonly IConfiguration? _configuration;
+        // Registered by instrument-observability (Phase 3, AgenticTokenCache). Held here so the
+        // observability skill can wire RegisterObservability(...) per turn without
+        // having to reopen the constructor.
+        private readonly IExporterTokenCache<AgenticTokenStruct>? _agentTokenCache;
         private readonly ILogger<MyAgent>? _logger;
         private readonly string? AgenticAuthHandlerName;
         private readonly string? OboAuthHandlerName;
@@ -553,11 +288,16 @@ namespace YourNamespace.Agent
             AgentApplicationOptions options,
             IChatClient chatClient,
             IConfiguration configuration,
+            IExporterTokenCache<AgenticTokenStruct> agentTokenCache,
             IMcpToolRegistrationService toolService,
             ILogger<MyAgent> logger) : base(options)
         {
             _chatClient = chatClient;
             _configuration = configuration;
+            // Registered by instrument-observability (Phase 3), which uses it
+            // for per-turn RegisterObservability(...) calls. Inject up-front so the constructor doesn't
+            // need to be reopened when the observability skill runs later.
+            _agentTokenCache = agentTokenCache;
             _toolService = toolService;
             _logger = logger;
 
@@ -635,29 +375,26 @@ namespace YourNamespace.Agent
                 // Restores prior turns from turnState, or creates a new session on first message.
                 var threadInfo = turnState.Conversation.GetValue<string?>("conversation.threadInfo", () => null);
                 var session = threadInfo is not null
-                    ? await clientAgent.DeserializeSessionAsync(
-                        System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(threadInfo),
-                        cancellationToken: cancellationToken)
+                    ? clientAgent.DeserializeSession(threadInfo)
                     : await clientAgent.CreateSessionAsync(cancellationToken);
 
                 // Streaming response
-                var streamingResponse = turnContext.StreamingResponse;
+                var streamingResponse = turnContext.GetStreamingResponse();
                 await foreach (var update in clientAgent.RunStreamingAsync(
                     turnContext.Activity.Text, session, null, cancellationToken))
                 {
-                    if (!string.IsNullOrEmpty(update.Text))
-                        streamingResponse.QueueTextChunk(update.Text);
+                    if (update is TextContent textContent)
+                        streamingResponse.QueueTextChunk(textContent.Text);
                 }
                 await streamingResponse.EndStreamAsync();
 
                 // Persist session for the next turn
-                turnState.Conversation.SetValue("conversation.threadInfo", (await clientAgent.SerializeSessionAsync(session, cancellationToken: cancellationToken)).GetRawText());
+                turnState.Conversation.SetValue("conversation.threadInfo", session.Serialize());
             }
             finally
             {
                 await typingCts.CancelAsync();
-                try { await typingTask; }
-                catch (OperationCanceledException) when (typingCts.IsCancellationRequested) { }
+                await typingTask.IgnoreCancellationExceptionAsync();
             }
         }
 
@@ -673,18 +410,19 @@ namespace YourNamespace.Agent
             if (!_agentToolCache.TryGetValue(conversationId, out var tools))
             {
                 // Surface a status update while tools load (can take a few seconds).
-                await turnContext.StreamingResponse.QueueInformativeUpdateAsync("Loading tools…", cancellationToken);
+                await turnContext.QueueInformativeUpdateAsync("Loading tools…", cancellationToken);
 
                 var agentId = turnContext.Activity.GetAgenticInstanceId();
                 var handlerForMcp = AgenticAuthHandlerName ?? string.Empty;
                 tools = await _toolService.GetMcpToolsAsync(
-                    agentId, UserAuthorization, handlerForMcp, turnContext, authToken: null);
+                    agentId, UserAuthorization, handlerForMcp, turnContext, tokenOverride: null);
                 _agentToolCache[conversationId] = tools;
             }
 
             var options = new ChatClientAgentOptions
             {
-                ChatOptions = new ChatOptions { Tools = tools.ToList(), Instructions = instructions },
+                ChatOptions = new ChatOptions { Tools = tools.ToList() },
+                Instructions = instructions,
             };
             return new ChatClientAgent(_chatClient!, options);
         }
@@ -834,11 +572,9 @@ Source: [Agent365-Samples/dotnet/semantic-kernel/sample-agent](https://github.co
 <PackageReference Include="Azure.Identity" Version="1.17.1" />
 
 <!-- Semantic Kernel Packages — pin to 1.71.0 (latest sample tested) -->
-<PackageReference Include="Microsoft.SemanticKernel.Connectors.AzureOpenAI" Version="1.71.0" />
+<PackageReference Include="Microsoft.SemanticKernel.Connectors.AzureOpenAI" Version="1.71.0-preview" />
 <PackageReference Include="Microsoft.SemanticKernel.Connectors.OpenAI" Version="1.71.0" />
 <PackageReference Include="Microsoft.SemanticKernel.Agents.Core" Version="1.71.0" />
-<PackageReference Include="Microsoft.Agents.A365.Tooling" Version="1.0.0" />
-<PackageReference Include="Microsoft.Agents.A365.Tooling.Extensions.SemanticKernel" Version="1.0.0" />
 ```
 
 Key difference from AgentFramework: use `Microsoft.SemanticKernel.*` packages instead of `Microsoft.Extensions.AI.OpenAI` and `Azure.AI.OpenAI`.
@@ -862,10 +598,8 @@ Key difference: `builder.Services.AddKernel()` + `AddAzureOpenAIChatCompletion` 
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-using YourNamespace;
 using YourNamespace.Agents;
 using Microsoft.Agents.Builder;
-using Microsoft.Agents.Builder.App;
 using Microsoft.Agents.Hosting.AspNetCore;
 using Microsoft.Agents.Storage;
 using Microsoft.Agents.Storage.Transcript;
@@ -1015,7 +749,6 @@ Key differences from AgentFramework: inject `Kernel` instead of `IChatClient`; u
 // Licensed under the MIT License.
 
 using Microsoft.Agents.Builder;
-using Microsoft.Agents.A365.Notifications.Models;
 using Microsoft.Agents.Builder.App;
 using Microsoft.Agents.Builder.State;
 using Microsoft.Agents.Core.Models;
@@ -1084,8 +817,7 @@ namespace YourNamespace.Agents
 
             // Inbound A365 notifications (e.g. EmailNotification, WpxComment).
             // Wildcard pattern matches any notification name.
-            AgentNotification.AgentNotificationExtensions.OnAgentNotification(
-                this, "*", OnAgentNotificationAsync);
+            OnAgentNotification("*", OnAgentNotificationAsync);
 
             // Message handlers — rank Last so they fall through after more specific routes.
             OnActivity(ActivityTypes.Message, OnMessageAsync,
@@ -1152,7 +884,7 @@ namespace YourNamespace.Agents
                 var history = new ChatHistory(instructions);
                 history.AddUserMessage(turnContext.Activity.Text ?? string.Empty);
 
-                var streamingResponse = turnContext.StreamingResponse;
+                var streamingResponse = turnContext.GetStreamingResponse();
                 await foreach (var update in chatService.GetStreamingChatMessageContentsAsync(
                     history, cancellationToken: cancellationToken))
                 {
@@ -1164,8 +896,7 @@ namespace YourNamespace.Agents
             finally
             {
                 await typingCts.CancelAsync();
-                try { await typingTask; }
-                catch (OperationCanceledException) when (typingCts.IsCancellationRequested) { }
+                await typingTask.IgnoreCancellationExceptionAsync();
             }
         }
         // Note: WorkIQ MCP tool loading is added by the add-workiq-tools skill.

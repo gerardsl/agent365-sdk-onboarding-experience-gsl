@@ -57,7 +57,7 @@ Run `a365 develop list-available` for the live catalog — these are capability 
 | Package | Purpose | Sample published? |
 |---------|---------|-------------------|
 | `microsoft-agents-a365-tooling` | Core MCP tooling runtime | yes (core) |
-| `microsoft-agents-a365-tooling-extensions-agentframework` | Published adapter; **not used** by the pinned AF profile below (umbrella dependency) | yes; existence does not certify a mixed-version app |
+| `microsoft-agents-a365-tooling-extensions-agentframework` | Agent Framework adapter | [yes](https://github.com/microsoft/Agent365-Samples/blob/main/python/agent-framework/sample-agent/agent.py) |
 | `microsoft-agents-a365-tooling-extensions-openai` | OpenAI Agents SDK adapter | [yes](https://github.com/microsoft/Agent365-Samples/blob/main/python/openai/sample-agent/agent.py) |
 | `microsoft-agents-a365-tooling-extensions-googleadk` | Google ADK adapter | [yes](https://github.com/microsoft/Agent365-Samples/blob/main/python/google-adk/sample-agent/agent.py) |
 | `microsoft-agents-a365-tooling-extensions-semantickernel` | Semantic Kernel adapter | **no** — best-effort wiring below |
@@ -72,7 +72,7 @@ Run `a365 develop list-available` for the live catalog — these are capability 
   - Claude: https://github.com/microsoft/Agent365-Samples/blob/main/python/claude/sample-agent/mcp_tool_registration_service.py (~165 lines)
   - CrewAI: https://github.com/microsoft/Agent365-Samples/blob/main/python/crewai/sample_agent/mcp_tool_registration_service.py (~600 lines, ships its own MCP HTTP client)
 
-**AF profile:** install the exact manifests linked below; do not run the generic adapter command. **Other supported, separately verified frameworks:** install core plus that framework's actual adapter:
+Install core + the matching adapter:
 ```bash
 pip3 install microsoft-agents-a365-tooling microsoft-agents-a365-tooling-extensions-<framework> 2>/dev/null \
   || pip install microsoft-agents-a365-tooling microsoft-agents-a365-tooling-extensions-<framework>
@@ -82,33 +82,90 @@ Also append the package names to `requirements.txt` or `[project.dependencies]` 
 
 ---
 
-## Python Agent Framework — Wiring (VERIFIED OFFLINE PROFILE)
+## Python Agent Framework — Wiring (VERIFIED)
 
-Use the pinned Agents 1.6 / AF core 1.17 / OpenAI integration 1.14.2 manifests
-and the **defined AF-only** `AgentFrameworkMcpTools` helper in
-[Python AI teammate](../../make-ai-teammate/references/python-ai-teammate.md).
-This is not the released SDK extension's `McpToolRegistrationService`.
-The official extension still exists, but its umbrella dependency is not part
-of this tested minimal profile.
+Sample: https://github.com/microsoft/Agent365-Samples/blob/main/python/agent-framework/sample-agent/agent.py
 
-1. Generate/migrate the complete `agent.py` and
-   `mcp_tool_registration_service.py` contract, preserving custom business tools.
-2. Set `ENABLE_WORKIQ=true` and explicitly choose `PYTHON_ENVIRONMENT`.
-3. Pass the current `app.auth`, configured handler and current `TurnContext`
-   into `for_turn` on **every invocation**, including notifications.
-4. Production uses core gateway discovery and core per-audience token exchange.
-   Development uses the real manifest/per-server environment token contract.
-5. Run the turn-local `RawAgent` inside that context. Exit the agent/MCP sessions
-   before the HTTP clients. The helper also closes failed/partially entered
-   MCP tools; do not keep `mcp_servers_initialized` or shared mutable `self.agent`.
+**Import** (verified):
+```python
+# A365 WorkIQ — added by add-workiq-tools skill
+from microsoft_agents_a365.tooling.extensions.agentframework.services.mcp_tool_registration_service import (
+    McpToolRegistrationService,
+)
+```
 
-The actual caller is the complete `_tools_for_turn` / `process_user_message`
-implementation in the linked reference, not a pseudocode singleton snippet.
-Tests exercised real core discovery against a loopback gateway, real MCP
-initialize/ping/list/call through mocked HTTP, and real AF/OpenAI tool loops.
-This does not certify live WorkIQ permissions or production service availability.
-Python Claude/LangChain/CrewAI hard stops are unchanged; never generate a generic
-MCP service for those unsupported branches.
+**Wiring** — instantiate the service in `__init__`, then attach MCP tools per agent lifetime (idempotent via `mcp_servers_initialized` flag). The sample uses a two-branch ladder switched by `USE_AGENTIC_AUTH`:
+
+```python
+import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+class MyAgent:
+    def __init__(self):
+        # ...existing __init__: self.chat_client, self.agent, self.AGENT_PROMPT...
+        # A365 WorkIQ — added by add-workiq-tools skill
+        self.tool_service = McpToolRegistrationService()
+        self.mcp_servers_initialized = False
+
+    async def setup_mcp_servers(self, auth, auth_handler_name, context, instructions=None):
+        """Discover and attach WorkIQ MCP tools. Idempotent per agent lifetime."""
+        if self.mcp_servers_initialized:
+            return
+        agent_instructions = instructions or self.AGENT_PROMPT
+        use_agentic_auth = os.getenv("USE_AGENTIC_AUTH", "false").lower() == "true"
+        bearer_token = os.getenv("BEARER_TOKEN", "")
+
+        try:
+            # A365 WorkIQ — added by add-workiq-tools skill
+            if use_agentic_auth:
+                # Agentic / production: omit auth_token. SDK calls auth.exchange_token() to mint
+                # a fresh per-audience token via the configured Authorization handler.
+                self.agent = await self.tool_service.add_tool_servers_to_agent(
+                    chat_client=self.chat_client,
+                    agent_instructions=agent_instructions,
+                    initial_tools=[],
+                    auth=auth,
+                    auth_handler_name=auth_handler_name,
+                    turn_context=context,
+                )
+            else:
+                # Local dev: pass BEARER_TOKEN from .env. May be "" — SDK treats empty == None
+                # and falls through to OBO exchange in production.
+                self.agent = await self.tool_service.add_tool_servers_to_agent(
+                    chat_client=self.chat_client,
+                    agent_instructions=agent_instructions,
+                    initial_tools=[],
+                    auth=auth,
+                    auth_handler_name=auth_handler_name,
+                    auth_token=bearer_token,
+                    turn_context=context,
+                )
+            if self.agent:
+                self.mcp_servers_initialized = True
+        except Exception as e:
+            logger.error("MCP setup error: %s", e)
+
+    async def process_user_message(self, message, auth, auth_handler_name, context):
+        await self.setup_mcp_servers(auth, auth_handler_name, context)
+        result = await self.agent.run(message)
+        return self._extract_result(result)
+```
+
+### Parameter semantics (`add_tool_servers_to_agent` — AF extension)
+
+| Param | What it actually does (from SDK source + sample) |
+|-------|--------------------------------------------------|
+| `chat_client` | Your LLM client (`AzureOpenAIChatClient` / `OpenAIChatClient`). Passed through to a new `RawAgent`. |
+| `agent_instructions` | System prompt for the rebuilt agent. Personalize per turn if needed. |
+| `initial_tools` | **Required** (positional, no default). Your pre-existing non-MCP tools. SDK does `all_tools = list(initial_tools) + discovered_mcp_tools`. Pass `[]` for MCP-only. Passing `None` raises `TypeError`. |
+| `auth` | `Authorization` from `process_user_message`. SDK uses this internally for `exchange_token`. |
+| `auth_handler_name` | Handler name registered in `AgentApplication.UserAuthorization`. |
+| `turn_context` | Current `TurnContext`. **Kwarg is `turn_context=`** for AF only — OpenAI / SK / ADK use `context=`. Cross-pasting will raise `TypeError: unexpected keyword argument`. |
+| `auth_token` | **Optional**. SDK guard is `if not auth_token and not is_dev:` — empty string and `None` are identical. In production both trigger `auth.exchange_token(turn_context, scopes, auth_handler_name)`. Pass a real token only for local dev (`a365 develop get-token`). |
+
+The SDK function rebuilds the agent: `RawAgent(client=chat_client, tools=all_tools, instructions=agent_instructions)`. The return value is the new agent — **must be reassigned to `self.agent`**.
 
 ---
 

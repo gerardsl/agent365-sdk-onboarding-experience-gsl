@@ -1,8 +1,6 @@
-# Step by step — what to say, and when to leave your CLI
+# Step by step: what to say, and when to leave your CLI
 
-Every step of onboarding is started by typing one phrase to your coding CLI — Claude Code, GitHub Copilot CLI, Cursor, or any other that reads the kit. This page is the sequence: the phrase, what happens, and the handful of moments where you run one command in your own terminal because the CLI's shell cannot.
-
-Prepare the README's [information checklist](../README.md#before-you-start--information-and-access-checklist) and use its [permissions by step](../README.md#onboarding-steps-and-required-permissions). Copying the kit, client consent, agent-resource access, publishing, and Purview policy administration require different rights.
+Every step of onboarding is started by typing one phrase to your coding CLI: Claude Code, GitHub Copilot CLI, Cursor, or any other that reads the kit. This page is the sequence: the phrase, what happens, and the handful of moments where you run one command in your own terminal because the CLI's shell cannot.
 
 Three stages, each optional after the first. Stop at whichever finish line you need.
 
@@ -10,7 +8,7 @@ Three stages, each optional after the first. Stop at whichever finish line you n
 |---|---|---|
 | **1. Register** | Blueprint, Entra identity, permissions, telemetry code. The agent is in the Agent 365 registry and visible to security. | *Onboard this agent to Agent 365.* |
 | **2. Chat** | Users can talk to it in Teams and Microsoft 365 Copilot. | *Make this agent chattable in Teams.* |
-| **3. Govern** | Every prompt and response checked by Purview DLP; Insider Risk sees it. | *Add DLP to this agent.* |
+| **3. Govern** | Sensitive prompts blocked by Purview DLP before the model; Insider Risk sees the agent. | *Add Purview DLP to my agent.* |
 
 The phrases work verbatim in every supported CLI. Type them exactly; the skills match on them.
 
@@ -19,18 +17,18 @@ The phrases work verbatim in every supported CLI. Type them exactly; the skills 
 ## Before you start (once)
 
 1. Extract the kit into your agent project's root folder.
-2. Open a **normal** terminal there (not Administrator on Windows) and run the launcher — it checks every prerequisite and prints install commands for anything missing:
+2. Open a **normal** terminal there (not Administrator on Windows) and run the launcher. It checks every prerequisite and prints install commands for anything missing:
    ```
-   .\agent365-kit.ps1          # Windows
-   ./agent365-kit.sh           # macOS / Linux
+   .\agent365-kit.ps1                               # Windows
+   chmod +x agent365-kit.sh && ./agent365-kit.sh    # macOS / Linux
    ```
 3. Sign in: `az login --allow-no-subscriptions`.
-4. Run `a365 setup requirements` to validate client/tenant readiness. Current documentation prefers Microsoft's managed client; custom-client setup and consent are conditional administrative handoffs. Shared client readiness does not give every developer roles, resource consent, or licences.
-5. Start your CLI in the project folder. Confirm it sees the skills — Copilot: `copilot skill list`; Claude Code: ask *What Agent 365 skills do you have?* This build contains fourteen skills.
+4. **Once per tenant, by an admin:** `a365 setup requirements` (Application Administrator or above). Developers skip this; if a later step says `403` or "tenant not ready", send that line to your admin.
+5. Start your CLI in the project folder. Confirm it sees the skills. In Copilot, run `copilot skill list`; in Claude Code, ask *What Agent 365 skills do you have?* Expect fifteen: eight Microsoft skills and seven kit add-ons.
 
 ---
 
-## Stage 1 — Register
+## Stage 1: Register
 
 **Say:** *Onboard this agent to Agent 365.*
 
@@ -40,9 +38,9 @@ The `a365-setup` skill detects your language and framework, then asks three thin
 |---|---|
 | Confirm what it detected | `yes`, or correct it |
 | Capabilities (1 Register · 2 Observability · 3 WorkIQ · 4 AI Teammate) | `1, 2` for a first run; add `3` for M365 data access; `4` only if the agent should have its own mailbox and UPN |
-| Auth mode (not asked for AI Teammate) | **OBO** if the agent must act for the caller; blueprint/resource consent and data access are still required |
+| Auth mode (not asked for AI Teammate) | **OBO**. The CLI created the delegated grants itself on our tenants; yours may still require an administrator to consent, and setup says so if it does |
 
-> **What this choice decides — and what it doesn't.** An ordinary blueprint route creates an agent identity during setup. An AI Teammate can later receive an associated agent user through approved instance provisioning. Registration alone does not provide Teams/Copilot availability: confirm a supported package/experience, administrator approval, audience policies and licences. The `--aiteammate true` publishing override selects the AI Teammate template branch; it is not a universally supported neutral conversion of an ordinary OBO agent.
+> **What this choice decides, and what it doesn't.** Pick 1–3 (OBO or S2S) and the agent's identity is created during `a365 setup all`; it is registered and governable with nothing to upload. Pick 4 (AI Teammate) and the identity is minted later, when the admin creates the instance. **Either way, appearing in Teams and Copilot requires the app package** (`manifest.zip`) uploaded and activated in the admin centre. Stage 2 covers it for both paths. The only difference is the command: on the blueprint path plain `a365 publish` refuses ("nothing to publish for blueprint-based agents"), and `a365 publish --aiteammate true` builds the package without changing your agent's kind.
 
 It writes config and code, then reaches `a365 setup all`. **This is the first "leave your CLI" moment:**
 
@@ -51,16 +49,20 @@ It writes config and code, then reaches `a365 setup all`. **This is the first "l
 3. Paste it into a second normal terminal in the same folder. Answer its prompts and complete the sign-in pop-up.
 4. Back in the CLI, say: *`a365 setup all` completed in a separate terminal. Read `a365.generated.config.json` and continue.*
 
-It finishes the code — observability, WorkIQ if chosen — and stops. Two checks before you call Stage 1 done:
+If the setup output says the blueprint needs consent for `maven-prod [Agent365.Observability.OtelWrite]`, say *Grant observability access to this agent.* An administrator then runs the grant it prints, signs in and confirms.
+
+Optionally, in step 3, prefix the command with `node .a365-kit/run-a365.mjs` (for example `node .a365-kit/run-a365.mjs setup all …`). It runs the same CLI and sign-in, and exits with code 2 and the administrator steps if the blueprint still needs observability consent.
+
+It finishes the code (observability, and WorkIQ if chosen) and stops. Two checks before you call Stage 1 done:
 
 - **Install the packages** (the skill lists them but does not install): `pip install -r requirements.txt` / `npm install` / `dotnet restore`, then confirm your agent still imports or builds. Python with WorkIQ: if the import fails on `microsoft_agents_a365.runtime`, add `microsoft-agents-a365-runtime>=1.0.0` and install again.
-- **Say:** *Validate A365 code.* — if it reports observability incomplete, **say:** *Add observability to this agent.* and validate again.
+- **Say:** *Validate A365 code.* If it reports observability incomplete, **say:** *Add observability to this agent.* and validate again.
 
 **Finish line: Registered.** Your agent exists in the registry with an identity. Many teams stop here.
 
 ---
 
-## Stage 2 — Chat in Teams and Copilot
+## Stage 2: Chat in Teams and Copilot
 
 Which phrase depends on the kind you chose in Stage 1.
 
@@ -68,23 +70,23 @@ Which phrase depends on the kind you chose in Stage 1.
 
 **Say:** *Make this agent chattable in Teams.*
 
-The `add-messaging-endpoint` add-on adds the `/api/messages` host for your language, proves it (health 200, anonymous POST 401), asks whether to start a dev tunnel or use a URL you host, and registers the endpoint on the blueprint — all from the CLI's shell. It then stops at the **second "leave your CLI" moment**, in the same folder:
+The `add-messaging-endpoint` add-on adds the `/api/messages` host for your language, proves it (health 200, anonymous POST 401), asks whether to start a dev tunnel or use a URL you host, and registers the endpoint on the blueprint, all from the CLI's shell. It then stops at the **second "leave your CLI" moment**, in the same folder:
 
 ```
-a365 setup permissions bot        # authorized administrator reviews each proposed permission
+a365 setup permissions bot        # answer y when it asks about the application permission
 ```
 
 Then verify in the Teams Developer Portal (it gives you the link) that **Agent Type = API Based** and **Notification URL** matches. Tell the CLI you are done.
 
-**Then confirm the supported publishing route with the administrator.** For a configured publishing experience:
+**Then package and upload. The agent is not visible in Teams until this is done.** Plain `a365 publish` refuses on this path; use the flag (it does not change your agent's kind):
 
 ```
-a365 publish                        # run in your own terminal
+a365 publish --aiteammate true       # writes manifest/manifest.zip; your own terminal. Verified on CLI 1.1.221; check --help on a newer CLI
 ```
 
-If a blueprint-only configuration reports “Nothing to publish,” review [README Step 8](../README.md#step-8--create-the-package) before using an AI Teammate override. Use the output path reported by the CLI. An **AI Administrator or Global Administrator** handles the supported Microsoft 365 admin-center upload/approval; the older developer walkthrough still specifies Global Administrator for its flow. Publishing an audience and creating/licensing an instance are separate actions.
+Edit `manifest/manifest.json` first if you want a better `name.short` (30 chars max), description or icons, then re-run. An admin uploads `manifest/manifest.zip` at **Microsoft 365 admin center → Agents → All agents → Upload custom agent**, activates it for an audience, and creates the instance if offered. Allow a few minutes.
 
-**Test:** *Test this agent locally.* opens AgentsPlayground against your host (works before the upload). In Teams, search for the agent by name and say hello (after the upload).
+**Test:** *Test this agent without Teams.* adds the loopback dev channel (`test-local-channel`). AgentsPlayground cannot sign in to a blueprint host, so Microsoft's *Test this agent locally* returns 401 here. In Teams, search for the agent by name and say hello (after the upload).
 
 ### AI Teammate (you chose capability 4)
 
@@ -103,18 +105,19 @@ Then an admin uploads `manifest.zip` at **Microsoft 365 admin center → Agents 
 
 ---
 
-## Stage 3 — Govern with Purview DLP
+## Stage 3: Govern with Purview DLP
 
-**Say:** *Add DLP to this agent.*
+**Say:** *Add Purview DLP to my agent.*
 
-The add-on wires prompt/response evaluation for Python, Node.js or .NET. Do not treat code generation or a Graph 200 response as proof of protection. Follow [README Step 10](../README.md#step-10--configure-and-verify-purview-dlp):
+Microsoft's `purview-dlp-integration` skill copies a guard into your agent, wires it before the model call, and sets `PURVIEW_DLP_ENABLED`. It asks whether to create a new DLP policy, use an existing one, or skip, and runs its scripts for the Graph grant and the policy; both need an administrator. It works for Python, Node.js or .NET.
 
-1. An authorized administrator consents `ProtectionScopes.Compute.User` and `Content.Process.User` for the intended delegated/application flow.
-2. Confirm the real user context, targeted application location, required Purview entitlement and any custom-app PAYG billing.
-3. A Purview DLP administrator creates an app-scoped blocking policy/rule using the documented PowerShell workflow and enforcement plane `Application`.
-4. Configure audit/collection and optional **Risky AI usage** Insider Risk/Defender sharing separately. These do not substitute for a blocking DLP rule.
+Then, for Insider Risk visibility [admin]:
 
-**Verify:** test both allowed and policy-matching prompts and confirm returned blocking actions are enforced. Verify supported response-policy behavior separately; collection or nonempty protection scopes alone do not prove blocking.
+1. Purview → Settings → Audit: on.
+2. Purview → Insider Risk Management → new policy from **Risky Agents (preview)**, indicator *Exposing agent to risky prompt*.
+3. IRM settings → Defender XDR alert sharing: on.
+
+**Verify:** send an ordinary message, then one containing a Luhn-valid test card such as `4111 1111 1111 1111`. Expect `[purview] uploadText -> BLOCKED` for the second and no model call. `allowed (... 0 policyAction(s) ...)` means no policy matches the app id yet. Allow up to an hour for a new policy and up to 24 hours for the first Insider Risk evaluation.
 
 **Finish line: Governed.**
 
@@ -126,7 +129,7 @@ The add-on wires prompt/response evaluation for Python, Node.js or .NET. Do not 
 |---|---|
 | *Validate A365 code.* | Read-only diagnosis of telemetry, identity binding and live grants; offers fixes |
 | *Add WorkIQ tools to this agent.* | Mail, calendar, Teams, SharePoint MCP servers; needs OBO |
-| *Test this agent locally.* | Starts the agent and AgentsPlayground — AI Teammate path |
+| *Test this agent locally.* | Starts the agent and AgentsPlayground (AI Teammate path) |
 | *Let me test this agent locally.* | Loopback-only dev channel for a blueprint agent: no tunnel, no tenant, no Teams. Off unless `A365_DEV_CHANNEL=true` |
 | *Update the Agent 365 kit.* | Replaces only the kit's files with the latest release, or your organisation's mirror |
 | *Check the kit prerequisites.* | The launcher's doctor, from the CLI |
@@ -142,7 +145,7 @@ Every skill is idempotent. Saying a phrase again on a half-done project finishes
 |---|---|---|
 | Stage 1, registration | `a365 setup all …` (copy from the prompt) | Signs in through the Windows broker, which needs a real window |
 | Stage 2, blueprint path | `a365 setup permissions bot` | Same broker, for the OAuth2 grant, plus a `y/N` prompt |
-| Stage 2 | `a365 publish` for the supported experience | Keep interactive prompts/output visible; an AI Teammate override is not a generic conversion |
-| Stage 2 and 3 | Admin center, Dev Portal, Purview/Compliance PowerShell | Appropriate administrator approval, policy and licensing handoffs |
+| Stage 2, both paths | `a365 publish` (`--aiteammate true` on the blueprint path) | Block-buffers its output under chat tools and looks hung |
+| Stage 2 and 3 | Teams Developer Portal, admin center, Purview | Portal-only; no API exists |
 
-Endpoint registration, tunnel management and kit updates can be driven by a coding CLI when authorized. Consent and policy steps may require an administrator's own authenticated session; never assume the developer's existing `az login` authorizes them.
+Everything else, including endpoint registration, the tunnel, the Purview grants and the kit's own updates, runs from inside your CLI.

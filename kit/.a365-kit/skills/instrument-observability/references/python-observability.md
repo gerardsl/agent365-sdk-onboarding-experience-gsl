@@ -32,8 +32,6 @@ The agent's `authMode` (read from `.a365-workspace-detection.local.json`) determ
 
 ## pip Packages
 
-> For the Agents 1.6 teammate profile, use the exact manifests in `python-ai-teammate.md` (distro 1.2.0, no legacy observability packages). Do not combine that AF matrix with the Google ADK-specific OTel pins below. Other framework/auth recipes in this reference are not certified by the AF fixture.
-
 | Package | Purpose |
 |---------|---------|
 | `microsoft-opentelemetry` (1.2.x GA) | Sole entry point. Re-exports `use_microsoft_opentelemetry`, baggage helpers (`populate`, `BaggageMiddleware`, `ObservabilityHostingManager`), `AgenticTokenCache`, all scope types (`InvokeAgentScope`, `InferenceScope`, `ExecuteToolScope`, `OutputScope`), and all contract types (`AgentDetails`, `CallerDetails`, `UserDetails`, `Request`, `Response`, `InvokeAgentScopeDetails`, `InferenceCallDetails`, `ToolCallDetails`, etc.). **Note:** Unlike Node.js, no `shutdown_microsoft_opentelemetry` helper is exported — see [Graceful Shutdown](#graceful-shutdown) for the OTel SDK-based pattern. |
@@ -82,256 +80,83 @@ Initialize the unified distro **before** importing the rest of your app so OpenA
 LangChain, Semantic Kernel, and Agent Framework auto-instrumentation can patch their
 target libraries.
 
-### OBO / agentic-user — shared modules for the Agents 1.6 teammate profile
-
-The executable profile below is verified for **agentic-user**, with an
-`AgenticUserAuthorization` handler and real runtime recipient IDs. Ordinary
-non-agentic OBO without those IDs is deliberately not inferred from a blueprint;
-retain a separately verified OBO integration rather than claiming this profile
-proves every authorization variant. S2S continues to use its separate service.
-
-Create exactly one copy of each module beside the host. Never import `__main__`,
-instantiate a second cache in a handler, or import an undefined `token_cache`.
-The released distro's `AgenticTokenCache` is not used: its 1.2 getter returns a
-`TokenResponse` and its original registration retains the first context.
-
-The host binds `TOKEN_STORE` to its running loop during aiohttp startup. Every
-authenticated message, notification and supported lifecycle handler registers
-the latest context/auth/handler before business code. The exporter imports
-`token_resolver` from this same module. Missing identity, expired binding,
-same-loop sync calls, unavailable loop, token failures and timeouts return None.
-The scope is obtained explicitly from the distro's real scope helper, not from
-the handler's Graph default scopes.
-
-#### observability_tokens.py
+### OBO / agentic-user (same code; identity decided by the auth handler)
 
 ```python
-from __future__ import annotations
+# A365 Observability — best-effort instrumentation (verify against official sample)
+# Must be called BEFORE importing other modules
+from dotenv import load_dotenv
+load_dotenv()
+
+from microsoft.opentelemetry import use_microsoft_opentelemetry
+from microsoft.opentelemetry.a365.hosting.token_cache_helpers import AgenticTokenCache
 
 import asyncio
-import concurrent.futures
-import logging
-import threading
-import time
-from collections import OrderedDict
-from dataclasses import dataclass
-from typing import Any
 
-from microsoft.opentelemetry.a365.runtime import get_observability_authentication_scope
+_token_cache = AgenticTokenCache()
 
-logger = logging.getLogger(__name__)
+# The exporter calls a365_token_resolver synchronously from its own thread, and
+# AgenticTokenCache only has an async getter, so run it on the host loop. Passing the
+# coroutine function directly sends "Bearer <coroutine object ...>", which the service
+# rejects as "Tenant id  is invalid." even though the tenant is configured correctly.
+HOST_LOOP: asyncio.AbstractEventLoop | None = None
 
 
-def access_token(response: Any) -> str | None:
-    value = response if isinstance(response, str) else getattr(response, "token", None)
-    return value if isinstance(value, str) and value.strip() else None
-
-
-def runtime_identity(context: Any) -> tuple[str, str] | None:
-    recipient = getattr(context.activity, "recipient", None)
-    agent_id = getattr(recipient, "agentic_app_id", None)
-    tenant_id = getattr(recipient, "tenant_id", None)
-    if not all(isinstance(value, str) and value.strip() for value in (agent_id, tenant_id)):
+def _observability_token(agent_id: str, tenant_id: str) -> str | None:
+    if HOST_LOOP is None or not HOST_LOOP.is_running():
         return None
-    return agent_id, tenant_id
+    try:
+        return asyncio.run_coroutine_threadsafe(
+            _token_cache.get_observability_token(agent_id, tenant_id), HOST_LOOP
+        ).result(timeout=15)
+    except Exception:
+        return None   # a telemetry failure must never cost a turn
 
 
-@dataclass(frozen=True)
-class _Binding:
-    context: Any
-    authorization: Any
-    handler: str
-    expires_at: float
-
-
-class TurnTokenStore:
-    def __init__(self, *, timeout: float = 15, ttl: float = 1800, capacity: int = 512):
-        self.timeout = timeout
-        self.ttl = ttl
-        self.capacity = capacity
-        self._lock = threading.Lock()
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._bindings: OrderedDict[tuple[str, str], _Binding] = OrderedDict()
-        self._pending: set[concurrent.futures.Future] = set()
-        self._tasks: set[asyncio.Task] = set()
-
-    def bind_loop(self) -> None:
-        loop = asyncio.get_running_loop()
-        with self._lock:
-            if self._loop is not None and self._loop is not loop and self._loop.is_running():
-                raise RuntimeError("A token store cannot serve two live host loops")
-            self._loop = loop
-
-    def register_turn(self, context: Any, authorization: Any, handler: str | None) -> bool:
-        identity = runtime_identity(context)
-        if identity is None or not handler or authorization is None:
-            return False
-        now = time.monotonic()
-        with self._lock:
-            if self._loop is None or not self._loop.is_running():
-                return False
-            expired = [key for key, binding in self._bindings.items() if binding.expires_at <= now]
-            for key in expired:
-                del self._bindings[key]
-            self._bindings[identity] = _Binding(context, authorization, handler, now + self.ttl)
-            self._bindings.move_to_end(identity)
-            while len(self._bindings) > self.capacity:
-                self._bindings.popitem(last=False)
-        return True
-
-    async def _exchange(self, binding: _Binding) -> str | None:
-        if self._loop is not asyncio.get_running_loop():
-            return None
-        task = asyncio.current_task()
-        self._tasks.add(task)
-        try:
-            response = await binding.authorization.exchange_token(
-                binding.context, get_observability_authentication_scope(), binding.handler
-            )
-            return access_token(response)
-        finally:
-            self._tasks.discard(task)
-
-    def resolve(self, agent_id: str, tenant_id: str) -> str | None:
-        try:
-            current_loop = asyncio.get_running_loop()
-        except RuntimeError:
-            current_loop = None
-        with self._lock:
-            loop = self._loop
-            binding = self._bindings.get((agent_id, tenant_id))
-            if (
-                loop is None
-                or not loop.is_running()
-                or loop.is_closed()
-                or loop is current_loop
-                or binding is None
-                or binding.expires_at <= time.monotonic()
-            ):
-                return None
-            coroutine = self._exchange(binding)
-            try:
-                future = asyncio.run_coroutine_threadsafe(coroutine, loop)
-            except RuntimeError:
-                coroutine.close()
-                return None
-            self._pending.add(future)
-        try:
-            return future.result(timeout=self.timeout)
-        except Exception as error:
-            future.cancel()
-            logger.warning("Observability token unavailable (%s)", type(error).__name__)
-            return None
-        finally:
-            with self._lock:
-                self._pending.discard(future)
-
-    async def aclose(self) -> None:
-        with self._lock:
-            self._loop = None
-            pending = tuple(self._pending)
-            self._bindings.clear()
-        for future in pending:
-            future.cancel()
-        # Let already-scheduled thread-safe callbacks create/cancel their tasks.
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-        tasks = tuple(self._tasks)
-        for task in tasks:
-            task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        with self._lock:
-            self._pending.clear()
-
-
-# Both the host producer and exporter consumer import this module, never __main__.
-TOKEN_STORE = TurnTokenStore()
-token_resolver = TOKEN_STORE.resolve
+use_microsoft_opentelemetry(
+    enable_a365=True,
+    a365_enable_observability_exporter=True,   # REQUIRED in 1.0+ to actually export spans
+    a365_token_resolver=_observability_token,
+)
 ```
 
-#### observability_bootstrap.py
-
-This AF profile disables unused LangChain/OpenAI Agents instrumentation rather
-than installing unrelated frameworks. For fully offline/console-only testing,
-also set `MICROSOFT_OTEL_SDKSTATS_DISABLED=true`: SDK statistics are a separate
-pipeline and are not controlled by the A365 exporter switch.
+`HOST_LOOP` has to be set from code that runs **on** the loop. The simplest place is the
+per-turn handler this skill already instruments — the same function that opens
+`InvokeAgentScope`. Reassigning it each turn is cheap and idempotent:
 
 ```python
-from __future__ import annotations
-
 import asyncio
-import os
+import src.agent as core          # the module holding HOST_LOOP
 
-from observability_tokens import token_resolver
-
-_configured = False
-
-
-class Agents16BaggageMiddleware:
-    async def on_turn(self, context, logic) -> None:
-        from microsoft.opentelemetry.a365.hosting.middleware.baggage_middleware import (
-            BaggageMiddleware,
-        )
-
-        # Distro 1.2 calls next(); Agents 1.6 requires next(context).
-        await BaggageMiddleware().on_turn(context, lambda: logic(context))
-
-
-def configure_observability() -> None:
-    global _configured
-    if _configured:
-        return
-    from microsoft.opentelemetry import use_microsoft_opentelemetry
-
-    enabled = os.getenv("ENABLE_A365_OBSERVABILITY_EXPORTER", "false").strip().lower()
-    if enabled not in {"true", "false"}:
-        raise ValueError("ENABLE_A365_OBSERVABILITY_EXPORTER must be true or false")
-    use_microsoft_opentelemetry(
-        enable_a365=True,
-        a365_enable_observability_exporter=(enabled == "true"),
-        enable_console=(enabled == "false"),
-        a365_token_resolver=token_resolver,
-        instrumentation_options={
-            "openai_agents": {"enabled": False},
-            "langchain": {"enabled": False},
-        },
-    )
-    _configured = True
-
-
-async def shutdown_observability() -> None:
-    if not _configured:
-        return
-    from opentelemetry import metrics, trace
-    from opentelemetry._logs import get_logger_provider
-
-    providers = (
-        trace.get_tracer_provider(),
-        metrics.get_meter_provider(),
-        get_logger_provider(),
-    )
-
-    def finish() -> None:
-        for provider in providers:
-            flush = getattr(provider, "force_flush", None)
-            shutdown = getattr(provider, "shutdown", None)
-            try:
-                if callable(flush):
-                    flush(timeout_millis=5000)
-            finally:
-                if callable(shutdown):
-                    shutdown()
-
-    # The exporter can still resolve tokens on the live host loop while it drains.
-    await asyncio.to_thread(finish)
+async def on_message(context, state):
+    core.HOST_LOOP = asyncio.get_running_loop()
+    with InvokeAgentScope.start(...):
+        ...
 ```
 
-Call `configure_observability()` before LLM imports, exactly as in the
-[shared host](../../make-ai-teammate/references/python-ai-teammate.md).
-The host's `cleanup_ctx` flushes providers on a worker while the loop and store
-remain usable, then closes the agent and cancels/drains token work. Do not rely
-solely on `atexit` or synchronously flush from the host event-loop thread.
+If the host has an async startup coroutine, setting it once there works equally well:
+
+```python
+async def start_server() -> None:
+    core.HOST_LOOP = asyncio.get_running_loop()
+```
+
+Leaving `HOST_LOOP` unset does not fail silently: the exporter logs
+`No token resolved for agent ...; dropping chunk N of M` at ERROR on every export.
+```
+
+> **Two flags required (1.0 breaking change):** `enable_a365=True` only registers
+> A365 span processors. You must **also** set `a365_enable_observability_exporter=True`
+> (or env `ENABLE_A365_OBSERVABILITY_EXPORTER=true`) to send spans to A365.
+
+> **GenAI auto-instrumentation is now ON by default.** OpenAI Agents, LangChain,
+> Semantic Kernel, and Agent Framework are auto-patched. Do NOT call legacy
+> `*Instrumentor().instrument()` — manual calls produce **duplicate spans**.
+>
+> **OpenAI Agents SDK migration note:** the published `Agent365-Samples/python/openai/sample-agent` still imports the legacy `configure(...)` API + `OpenAIAgentsTraceInstrumentor().instrument()`. **If you see `OpenAIAgentsTraceInstrumentor().instrument()` in user code copied from that sample, REMOVE it** — auto-instrumentation in `microsoft-opentelemetry` 1.2+ handles it. Replace `configure(...)` with `use_microsoft_opentelemetry(enable_a365=True, a365_enable_observability_exporter=True, ...)`.
+
+> **Non-GenAI instrumentations** (HTTP, DB, etc.) are **disabled by default** when
+> `enable_a365=True`. Opt them back in via the distro's `instrumentation_options` kwarg if needed.
 
 ### S2S (`authMode: s2s`)
 
@@ -618,38 +443,104 @@ ENABLE_A365_OBSERVABILITY_EXPORTER=true
 
 ## Adapter — Hosting Baggage
 
-For Agents 1.6 plus distro 1.2, register the tested callback adapter once:
+Register hosting baggage helpers to auto-populate baggage from every incoming `TurnContext`.
+This removes the need to call `BaggageBuilder` manually in each handler.
 
 ```python
-from observability_bootstrap import Agents16BaggageMiddleware
+from microsoft.opentelemetry.a365.hosting import (
+    ObservabilityHostingManager,
+    ObservabilityHostingOptions,
+)
 
-adapter.use(Agents16BaggageMiddleware())
+ObservabilityHostingManager.configure(
+    adapter.middleware_set,
+    ObservabilityHostingOptions(
+        enable_baggage=True,           # defaults to False — must be explicitly set
+        enable_output_logging=True,    # defaults to False — optional output logging
+    ),
+)
 ```
 
-Do not additionally call `ObservabilityHostingManager.configure` in this profile.
-Its raw 1.2 middleware calls `next()`; the 1.6 middleware set requires
-`next(context)`. The bridge keeps the SDK's real baggage population and scope
-lifetime while adapting only that callback contract.
+> **Both options default to `False`.** Without `enable_baggage=True`, the middleware won't
+> populate baggage from `TurnContext`, and your spans will lack tenant/agent identity.
 
 ---
 
 ## Message Handler
 
-### Agentic-user — register the same store on every appropriate turn
+With `ObservabilityHostingManager.configure(..., enable_baggage=True)` registered at startup,
+the handler does NOT build baggage manually. Per-turn behavior differs by auth mode.
 
-Use the complete authenticated host in `python-ai-teammate.md`, not an isolated
-decorator with an undefined `self`. Its message, notification, member-added and
-installation handlers all call `_register_turn(context)` after SDK sign-in.
-That method registers `context`, `self.agent_application.auth` and the configured
-`AUTH_HANDLER_NAME` in `observability_tokens.TOKEN_STORE`.
+### OBO and agentic-user — refresh exporter token per turn
 
-The bootstrap reads **that exact store**, not a separate SDK cache. Re-register
-each turn so a later user/context replaces an earlier binding. Baggage and the
-cache use the same runtime recipient identity; do not substitute environment
-blueprint IDs. Keep `RawAgent.id` aligned to that runtime agent ID.
+The handler shape is identical for both `obo` and `agentic-user`. The Azure AD auth handler
+configured in your `AgentApplication` decides which identity the token exchange returns:
 
-Middleware handles baggage only. It never replaces the per-turn token producer.
-Do not skip registration merely because baggage middleware was configured.
+- **`agentic-user`** (AI Teammate) — `agent_app.auth.exchange_token(...)` returns a token for
+  the agent's own Azure AD user identity (Agentic User). Traces attribute to the agent.
+- **`obo`** (non-AI Teammate) — `agent_app.auth.exchange_token(...)` returns a token for
+  whatever the configured Azure AD auth handler resolves. Typically this is the signed-in user
+  (traces attribute to that user), but it can also be the agent's own identity if the handler
+  is configured that way.
+
+```python
+# A365 Observability — best-effort instrumentation (verify against official sample)
+# A365 auth mode: agentic-user  (or: obo)
+from microsoft_agents_a365.runtime.environment_utils import get_observability_authentication_scope
+from token_cache import cache_agentic_token
+
+
+async def _setup_observability_token(self, context, tenant_id, agent_id):
+    """OBO / agentic-user: exchange token and cache for the exporter to pick up."""
+    try:
+        exaau_token = await self.agent_app.auth.exchange_token(
+            context,
+            scopes=get_observability_authentication_scope(),
+            auth_handler_id=self.auth_handler_name,   # from config — NOT hardcoded "AGENTIC"
+        )
+        cache_agentic_token(tenant_id, agent_id, exaau_token.token)
+    except Exception as e:
+        logger.warning(f"Failed to cache observability token: {e}")
+
+
+@AGENT_APP.activity("message", auth_handlers=["AGENTIC"])
+async def on_message(context: TurnContext, state: TurnState):
+    tenant_id = context.activity.recipient.tenant_id
+    agent_id = context.activity.recipient.agentic_app_id
+
+    # OBO / agentic-user: refresh per-turn token (skip this for S2S).
+    await self._setup_observability_token(context, tenant_id, agent_id)
+
+    # ObservabilityHostingManager (registered at startup) already populated baggage
+    # from TurnContext. Your handler logic can run directly:
+    response = await self.invoke_llm(context.activity.text)
+    await context.send_activity(response)
+```
+
+> **`auth_handler_id`** must come from config (`AgentApplication:AgenticAuthHandlerName`)
+> — **never hardcode `"AGENTIC"`**. The handler is the auth handler registered in your
+> agent setup; its configured identity (user delegated or agent's own) determines whose
+> token gets returned.
+
+#### Canonical: manual per-turn baggage construction (matches AF sample)
+
+**This is the path the verified `Agent365-Samples/python/agent-framework/sample-agent` actually takes** — `ObservabilityHostingManager` middleware is a fallback, but the AF sample builds baggage manually inside the handler to ensure the outer wrapping is present for InvokeAgentScope + InferenceScope. Without this exact ordering, spans risk being filtered as "0 identity groups" — same silent-drop risk seen in the Node.js LangChain path.
+
+```python
+# A365 Observability — best-effort instrumentation (verify against official sample)
+# Imports use the legacy module paths (still required even with the unified distro entry point):
+from microsoft.opentelemetry.a365.core.middleware.baggage_builder import BaggageBuilder
+from microsoft_agents_a365.runtime.environment_utils import get_observability_authentication_scope
+
+# In your message handler:
+tenant_id = context.activity.recipient.tenant_id
+agent_id = context.activity.recipient.agentic_app_id
+
+with BaggageBuilder().tenant_id(tenant_id).agent_id(agent_id).build():
+    # InvokeAgentScope / InferenceScope / agent invocation inside this `with` block
+    # so they inherit the baggage. Spans outside will be filtered.
+    pass
+```
 
 ### S2S — no per-turn refresh
 
@@ -916,15 +807,30 @@ use_microsoft_opentelemetry(
 
 ## Graceful Shutdown
 
-For the Agents 1.6 teammate profile, use `GenericAgentHost.cleanup()` from the
-shared host. It calls `shutdown_observability()` on the still-live loop; that
-helper flushes/shuts down trace, metric and logging providers on a worker thread.
-Only afterward does the host close the agent and `TOKEN_STORE`.
+The distro doesn't yet document an official shutdown helper (gap vs Node.js's
+`shutdownMicrosoftOpenTelemetry()`). For now, rely on the OTel SDK's `TracerProvider.shutdown()`
+and/or `atexit` to flush pending spans:
 
-Do not add a synchronous `TracerProvider.shutdown()` aiohttp callback or rely
-only on `atexit`: either can run too late or block the loop needed by the
-exporter's synchronous-to-async token resolver. Preserve the S2S service's own
-cancellation/cleanup separately when using that different profile.
+```python
+import atexit
+from opentelemetry import trace
+
+def _shutdown_tracing():
+    provider = trace.get_tracer_provider()
+    if hasattr(provider, "shutdown"):
+        provider.shutdown()
+
+atexit.register(_shutdown_tracing)
+```
+
+For aiohttp applications, also register an `on_cleanup` hook:
+
+```python
+async def cleanup_observability(app):
+    _shutdown_tracing()
+
+app.on_cleanup.append(cleanup_observability)
+```
 
 ---
 
@@ -969,7 +875,7 @@ AGENT365_SPONSOR_USER_EMAIL=<<Sponsor Email>>
 
 ## Validate Locally
 
-For local console-only runs, set `ENABLE_A365_OBSERVABILITY_EXPORTER=false`, omit `a365_enable_observability_exporter` or set it to `False`, AND set `enable_console=True`. In 1.2.0 the effective exporter flag is the OR of the code flag and the environment flag; either remaining true keeps network export enabled. Console export is not automatically enabled merely because the A365 exporter is disabled while `enable_a365=True`.
+Set `ENABLE_A365_OBSERVABILITY_EXPORTER=false` (or omit `a365_enable_observability_exporter`) — spans go to the console only.
 
 To investigate export failures, enable verbose logging:
 

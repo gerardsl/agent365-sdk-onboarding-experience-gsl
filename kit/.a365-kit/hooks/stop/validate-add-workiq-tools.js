@@ -230,22 +230,6 @@ function checkNodejs() {
 }
 
 function checkPython() {
-  const pinnedAf = agentStack === 'agentframework' && reqFiles.some(f => {
-    try { return /agent[-_]framework[-_]core\s*==\s*1\.17\.0\b/.test(fs.readFileSync(f, 'utf8')); }
-    catch { return false; }
-  });
-  if (pinnedAf) {
-    if (!anyFileContains(pyFiles, 'AgentFrameworkMcpTools') ||
-        !anyFileContains(pyFiles, 'MCPStreamableHTTPTool') ||
-        !anyFileContains(pyFiles, 'list_tool_servers')) {
-      issues.push('Pinned Python AF profile: AgentFrameworkMcpTools, MCPStreamableHTTPTool and core server discovery wiring are required');
-    }
-    if (!reqFiles.some(f => fileContains(f, 'microsoft-agents-a365-tooling') ||
-        fileContains(f, 'microsoft_agents_a365_tooling'))) {
-      issues.push('Pinned Python AF profile: microsoft-agents-a365-tooling must be recorded in the dependency manifest');
-    }
-    return;
-  }
   // Symbol is the same (add_tool_servers_to_agent) across all Python extensions —
   // the difference is the extension package name. SK and Foundry are best-effort
   // (no published sample) so use looser symbol checks.
@@ -419,20 +403,20 @@ if (a365Version) {
 
 // ── Build check ─────────────────────────────────────────────────────────────
 
+// Share only compiler execution; every feature check above still runs. See NOTICE.md section 22.
 function runBuild(cmd, timeoutMs) {
   try {
-    const out = execSync(cmd, { cwd, timeout: timeoutMs, stdio: 'pipe' }).toString();
-    return { ok: true, output: out };
-  } catch (e) {
-    const out = [(e.stdout || '').toString(), (e.stderr || '').toString()].join('\n').trim();
-    return { ok: false, output: out.slice(0, 400) };
+    return require('../../lib/local-work.cjs').runBuild(cmd, timeoutMs, { cwd });
+  } catch (error) {
+    console.error('[local-work] ' + error.message);
+    return { ok: false, output: error.message };
   }
 }
 
 if (!process.env.VALIDATE_SKIP_EXEC) {
   if (isDotnet) {
     const result = runBuild('dotnet build --no-restore -v minimal', 25000);
-    if (!result.ok || !result.output.includes('Build succeeded')) {
+    if (!result.ok) { // The shared helper retains the exit-code and 'Build succeeded' requirements.
       issues.push('dotnet build --no-restore failed — fix compilation errors before ending the session');
     }
   } else if (isNodejs) {

@@ -74,6 +74,15 @@ To update from a specific file or URL just once (a build you are testing, or a d
 
 Relay the table. For anything marked `MISS`, offer to run the install command it printed, then remind the user to open a new terminal before re-checking -- PATH changes do not reach an existing shell.
 
+The checker runs at most four read-only probes concurrently while preserving
+the report order and required/optional verdicts. For the setup-skill
+inventory, use `node .a365-kit/doctor.js --setup --json`; this profile checks
+Az.Accounts, gh, npm and uv, and applies setup's PowerShell/Python minimums.
+Setup already runs inside a coding CLI and verifies sign-in separately in
+Step 2, so its profile does not repeat those two launcher checks.
+Every invocation checks fresh state and persists no cache. A masked sign-in
+result is not verification of the intended account, tenant or consent.
+
 ## 3. Show versions
 
 **Read** `.a365-kit/KIT-VERSION.json` and report `kitVersion`, `upstreamVersion` and

@@ -40,7 +40,7 @@ hooks:
 
 # Add WorkIQ Tools (A365 CLI + SDK)
 
-> **Local revision corrections:** Before commands or code edits, read `.a365-kit/shared/local-runtime-lessons.md`. Its verified identity, authentication, transport and verification corrections supersede conflicting older snippets below. Preserve the existing framework and explicit user choices.
+> **Kit runtime corrections:** Before commands or code edits, read `.a365-kit/shared/local-runtime-lessons.md`. Its verified identity, authentication, transport and verification corrections supersede conflicting older snippets below. Preserve the existing framework and explicit user choices.
 
 > **Trigger phrases** — any of these will activate this skill automatically:
 > - "add workiq tools to this agent"
@@ -88,7 +88,7 @@ All changes are **additive** and **idempotent** — rerunning is safe.
 Run in parallel:
 
 - **Glob** `**/*.csproj`, `package.json`, `requirements.txt`, `pyproject.toml`, `src/**/*.ts`, `**/*.cs`, `**/*.py` → `hasProjectFiles`.
-- **Read** `.a365-workspace-detection.local.json` → `cacheState` (`fresh` if `detectedAt` < 60 min, `stale` if older, `missing` if absent).
+- **Read** `.a365-kit/shared/local-work.md` and run `node .a365-kit/local-work.mjs status`: `unchanged` means `cacheState = fresh`, `refresh-required` means `stale`, and `missing` means `missing`. Invalid metadata requires local repair; unavailable helper execution requires direct local detection, not guessed defaults. These states never prove tenant readiness.
 
 Decide:
 
@@ -96,7 +96,8 @@ Decide:
 |--------------|-------------------|--------|
 | `fresh`      | —                 | Continue to Step 2 below. |
 | `missing` / `stale` | false       | **Hard stop with a useful message:** *"WorkIQ tools wire MCP servers into an existing agent — there's no agent code in this workspace yet. Run `/make-ai-teammate` (recommended — WorkIQ requires an AI Teammate or OBO agent) first to scaffold and register the agent, then come back here."* Do not proceed. |
-| `missing` / `stale` | true        | Tell the user: *"Found existing agent code but no fresh Agent 365 registration. I'll run `a365-setup` now to register it and write the detection cache, then continue here automatically."* **Read** `.a365-kit/skills/a365-setup/SKILL.md` and follow it to completion, then continue to Step 2. |
+| `missing` | true        | Tell the user: *"Found existing agent code but no confirmed local detection metadata. I'll run the initial `a365-setup` detection and choice flow, checking existing blueprint configuration before any provisioning, then continue here."* **Read** `.a365-kit/skills/a365-setup/SKILL.md` and follow it to completion, then continue to Step 2. |
+| `stale` | true | Follow **Refresh local detection without provisioning** in `.a365-kit/shared/local-work.md`, then continue to Step 2. Preserve explicit choices, the S2S guard and live catalog/consent checks; do not rerun provisioning because of local cache age. |
 
 ### Step 2 — Load from cache
 
@@ -366,7 +367,7 @@ For every branch:
 1. **Grep the target file for the observability anchor symbols:**
    - **.NET** (`AgentApplication` subclass): `BaggageBuilder`, `InvokeAgentScope`, `InferenceScope`, `Agent365ObservabilityContext`
    - **Node.js** (`src/agent.ts` and `src/client.ts`): `BaggageBuilder`, `BaggageBuilderUtils`, `InvokeAgentScope`, `InferenceScope`, `AgenticTokenCacheInstance`, `preloadObservabilityToken`
-   - **Python** (host, agent and helper modules): `TOKEN_STORE`, `token_resolver`, `Agents16BaggageMiddleware`, `AgentFrameworkMcpTools`, `for_turn`, plus existing `BaggageBuilder` / `InvokeAgentScope` customizations
+   - **Python** (`agent.py`): `BaggageBuilder`, `populate_baggage`, `InvokeAgentScope`, `with builder.build()`, `AgenticTokenCache`
 
 2. **If any of those symbols are present**, scope your `Edit` `old_string` **as narrowly as possible** — anchor on the **single statement immediately before/after** the new line, never a multi-statement block, never the method signature alone, never the full method body. Examples:
    - ✅ Good: anchor on the `var response = await chatClient.GetResponseAsync(...)` line and insert `GetMcpToolsAsync` immediately above it.
@@ -444,18 +445,16 @@ Tell the user verbatim: *"Microsoft publishes the `Microsoft.Agents.A365.Tooling
 
 ### §4.7 Python Agent Framework
 
-1. Read the **VERIFIED OFFLINE PROFILE** section of `python-workiq.md` and
-   the complete AF/helper code plus pinned manifests in `python-ai-teammate.md`.
-2. Update the existing manifest before installing. Use the explicit
-   `agent-framework-core==1.17.0`, `agent-framework-openai==1.14.2`,
-   `openai==3.8.0`, A365 tooling 1.0.0 and matching host/distro pins from that
-   profile. Do not add the umbrella or A365 AF extension to this profile.
-3. Generate/migrate `AgentFrameworkMcpTools` and the complete per-turn
-   `_tools_for_turn` contract. Set `ENABLE_WORKIQ=true`. Do not add a
-   first-turn `mcp_servers_initialized` flag or overwrite shared `self.agent`.
-4. Preserve current `app.auth`, handler, current context, runtime identity,
-   telemetry registration and custom tools. Ensure agent/MCP/client cleanup
-   occurs on both success and partial failure.
+1. **Grep** `microsoft-agents-a365-tooling` in `requirements.txt` / `pyproject.toml`. If missing:
+   ```bash
+   pip3 install microsoft-agents-a365-tooling microsoft-agents-a365-tooling-extensions-agentframework 2>/dev/null \
+     || pip install microsoft-agents-a365-tooling microsoft-agents-a365-tooling-extensions-agentframework
+   ```
+   **Edit** `requirements.txt` or `[project.dependencies]` in `pyproject.toml` to add both package names — `pip install` alone does NOT update either file, and the validator requires their presence.
+
+   > Package suffix is **`agentframework`** (single word, no internal dash). `…-agent-framework` is not a valid PyPI name and will fail `pip install`.
+2. **Read** `python-workiq.md` — section "Python Agent Framework — Wiring (VERIFIED)".
+3. **Edit** `agent.py` to add the `tool_service` singleton, `mcp_servers_initialized` flag, the `setup_mcp_servers` method, and the call from `process_user_message`. **AF kwarg is `turn_context=`**, not `context=`. **`initial_tools=[]` is required** (positional, no default).
 
 ### §4.8 Python OpenAI
 
@@ -680,17 +679,17 @@ Tell the user: tokens expire — re-run `a365 develop get-token` to refresh.
 ### For .NET AgentFramework
 
 ```bash
-dotnet build
+node .a365-kit/local-work.mjs run dotnet-restore && node .a365-kit/local-work.mjs run dotnet-build
 ```
 
 ### For Node.js
 
 ```bash
-npm install
+node .a365-kit/local-work.mjs run npm-install || exit $?
 if node -e 'process.exit(require("./package.json").scripts?.build ? 0 : 1)'; then
-  npm run build || exit $?
+  node .a365-kit/local-work.mjs run node-build || exit $?
 elif node -e 'process.exit(require("./package.json").scripts?.compile ? 0 : 1)'; then
-  npm run compile || exit $?
+  node .a365-kit/local-work.mjs run node-build || exit $?
 else
   echo "No build/compile script found - skipping compile check"
 fi
@@ -698,17 +697,12 @@ fi
 
 ### For Python
 
-For the pinned AF profile, restore its manifest in the project environment and run:
-
-```powershell
-python -c "from mcp_tool_registration_service import AgentFrameworkMcpTools; from agent_framework_openai import OpenAIChatCompletionClient; from agent_framework import RawAgent; print('AF WorkIQ imports OK')"
+```bash
+node .a365-kit/local-work.mjs run python-restore || exit $?
+python3 -c "from microsoft_agents_a365.tooling.extensions.agent_framework import McpToolRegistrationService; print('WorkIQ imports OK')" 2>/dev/null || python -c "from microsoft_agents_a365.tooling.extensions.agent_framework import McpToolRegistrationService; print('WorkIQ imports OK')"
 ```
 
-Also exercise the offline core discovery/per-audience/MCP tool-loop contract;
-an import alone does not validate token freshness or lifecycle cleanup.
-For other supported frameworks use only their separately verified reference
-imports. Python LangChain, Claude and CrewAI hard stops remain in force; do not
-guess a `.langchain` namespace or fall back to an unrelated generic service.
+Adjust the import path to match the installed framework extension (e.g. `.langchain`, `.openai`).
 
 If build fails, present error output with suggested fixes. Do not revert changes.
 
