@@ -404,8 +404,8 @@
     },
     {
       "path": "kit/.a365-kit/skills/instrument-observability/SKILL.md",
-      "bytes": 77275,
-      "sha256": "6f00bdfada843f504df6f10c1f9c05b4b5c9b7bdbdb3823a0e7c2b1eb8a454db"
+      "bytes": 77539,
+      "sha256": "89f594ac43d3e4493ce0148b0b6cae98cf444949c53970382ec7cb8aab9c24d1"
     },
     {
       "path": "kit/.a365-kit/skills/make-a365-agent/SKILL.md",
@@ -664,8 +664,8 @@
     },
     {
       "path": "kit/.agents/skills/instrument-observability/SKILL.md",
-      "bytes": 77275,
-      "sha256": "6f00bdfada843f504df6f10c1f9c05b4b5c9b7bdbdb3823a0e7c2b1eb8a454db"
+      "bytes": 77539,
+      "sha256": "89f594ac43d3e4493ce0148b0b6cae98cf444949c53970382ec7cb8aab9c24d1"
     },
     {
       "path": "kit/.agents/skills/make-a365-agent/SKILL.md",
@@ -944,8 +944,8 @@
     },
     {
       "path": "kit/.claude/skills/instrument-observability/SKILL.md",
-      "bytes": 77275,
-      "sha256": "6f00bdfada843f504df6f10c1f9c05b4b5c9b7bdbdb3823a0e7c2b1eb8a454db"
+      "bytes": 77539,
+      "sha256": "89f594ac43d3e4493ce0148b0b6cae98cf444949c53970382ec7cb8aab9c24d1"
     },
     {
       "path": "kit/.claude/skills/make-a365-agent/SKILL.md",

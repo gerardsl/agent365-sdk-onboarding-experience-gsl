@@ -909,7 +909,12 @@ az rest --method POST --url "https://graph.microsoft.com/v1.0/servicePrincipals/
 rm body.json
 ```
 
-- `resourceId` `<OBSERVABILITY_SP_OBJECT_ID>` is the `Agent365Observability` service principal object ID in your own tenant; look it up with `az rest --method GET --uri "https://graph.microsoft.com/v1.0/servicePrincipals?$filter=displayName eq 'Agent365Observability'" --query "value[0].id" --output tsv` ([Grant Agent 365 observability permissions](https://learn.microsoft.com/azure/foundry/agents/how-to/grant-agent-365-permissions#identify-the-required-ids)).
+- `resourceId` `<OBSERVABILITY_SP_OBJECT_ID>` is the `Agent365Observability` service principal object ID in your own tenant; look it up with `az rest --method GET --uri "https://graph.microsoft.com/v1.0/servicePrincipals?\$filter=displayName eq 'Agent365Observability'" --query "value[0].id" --output tsv` ([Grant Agent 365 observability permissions](https://learn.microsoft.com/azure/foundry/agents/how-to/grant-agent-365-permissions#identify-the-required-ids)). In PowerShell, backtick-escape the dollar sign so the filter is sent literally:
+
+```powershell
+az rest --method GET --uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=displayName eq 'Agent365Observability'" --query "value[0].id" --output tsv
+```
+
 - `appRoleId` `8f71190c-...` is the OtelWrite role ID
 - For agents provisioned before CLI 1.1, this manual step is still required
 
