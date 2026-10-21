@@ -65,7 +65,7 @@ e15a0bef8aad8337577b6aa600cec1b24a8c887dd3fc41cc0b9880eadb3934e3  kit/.a365-kit/
 36053f30a846039d4f97fc32a8878c52997890fedfab2eae948c42b2a98c5dc3  kit/.a365-kit/skills/instrument-observability/references/dotnet-observability.md
 15c29abd5cc1d469a05eb7905bdf8a6ca98dac45220beb45265fc5a7b13ffae9  kit/.a365-kit/skills/instrument-observability/references/nodejs-observability.md
 28b90d34f434026cf5c7c05c183d6e6776971b9e5179d0d0b9be0785ad5118c9  kit/.a365-kit/skills/instrument-observability/references/python-observability.md
-660355df428376493c6f1f4029d0a6d86af91a79b36af7baf1a24a6895b819f9  kit/.a365-kit/skills/instrument-observability/SKILL.md
+6f00bdfada843f504df6f10c1f9c05b4b5c9b7bdbdb3823a0e7c2b1eb8a454db  kit/.a365-kit/skills/instrument-observability/SKILL.md
 f21899845ac12e91a2df7ee9cbcdafc2cfbb1de9843806179c7249ee5ab0e733  kit/.a365-kit/skills/make-a365-agent/SKILL.md
 7007fb421cb72ad0af1914bd37a626fd027865eeba9feac34a50e960dc4fc816  kit/.a365-kit/skills/make-ai-teammate/references/deploy-pipeline.md
 b0b23cbd1d8197e9174fb487ef9555b44905cf78ce82c4cd4a12d6bd3696f398  kit/.a365-kit/skills/make-ai-teammate/references/dotnet-ai-teammate.md
@@ -117,7 +117,7 @@ e15a0bef8aad8337577b6aa600cec1b24a8c887dd3fc41cc0b9880eadb3934e3  kit/.agents/sk
 36053f30a846039d4f97fc32a8878c52997890fedfab2eae948c42b2a98c5dc3  kit/.agents/skills/instrument-observability/references/dotnet-observability.md
 15c29abd5cc1d469a05eb7905bdf8a6ca98dac45220beb45265fc5a7b13ffae9  kit/.agents/skills/instrument-observability/references/nodejs-observability.md
 28b90d34f434026cf5c7c05c183d6e6776971b9e5179d0d0b9be0785ad5118c9  kit/.agents/skills/instrument-observability/references/python-observability.md
-660355df428376493c6f1f4029d0a6d86af91a79b36af7baf1a24a6895b819f9  kit/.agents/skills/instrument-observability/SKILL.md
+6f00bdfada843f504df6f10c1f9c05b4b5c9b7bdbdb3823a0e7c2b1eb8a454db  kit/.agents/skills/instrument-observability/SKILL.md
 f21899845ac12e91a2df7ee9cbcdafc2cfbb1de9843806179c7249ee5ab0e733  kit/.agents/skills/make-a365-agent/SKILL.md
 7007fb421cb72ad0af1914bd37a626fd027865eeba9feac34a50e960dc4fc816  kit/.agents/skills/make-ai-teammate/references/deploy-pipeline.md
 b0b23cbd1d8197e9174fb487ef9555b44905cf78ce82c4cd4a12d6bd3696f398  kit/.agents/skills/make-ai-teammate/references/dotnet-ai-teammate.md
@@ -173,7 +173,7 @@ e15a0bef8aad8337577b6aa600cec1b24a8c887dd3fc41cc0b9880eadb3934e3  kit/.claude/sk
 36053f30a846039d4f97fc32a8878c52997890fedfab2eae948c42b2a98c5dc3  kit/.claude/skills/instrument-observability/references/dotnet-observability.md
 15c29abd5cc1d469a05eb7905bdf8a6ca98dac45220beb45265fc5a7b13ffae9  kit/.claude/skills/instrument-observability/references/nodejs-observability.md
 28b90d34f434026cf5c7c05c183d6e6776971b9e5179d0d0b9be0785ad5118c9  kit/.claude/skills/instrument-observability/references/python-observability.md
-660355df428376493c6f1f4029d0a6d86af91a79b36af7baf1a24a6895b819f9  kit/.claude/skills/instrument-observability/SKILL.md
+6f00bdfada843f504df6f10c1f9c05b4b5c9b7bdbdb3823a0e7c2b1eb8a454db  kit/.claude/skills/instrument-observability/SKILL.md
 f21899845ac12e91a2df7ee9cbcdafc2cfbb1de9843806179c7249ee5ab0e733  kit/.claude/skills/make-a365-agent/SKILL.md
 7007fb421cb72ad0af1914bd37a626fd027865eeba9feac34a50e960dc4fc816  kit/.claude/skills/make-ai-teammate/references/deploy-pipeline.md
 b0b23cbd1d8197e9174fb487ef9555b44905cf78ce82c4cd4a12d6bd3696f398  kit/.claude/skills/make-ai-teammate/references/dotnet-ai-teammate.md

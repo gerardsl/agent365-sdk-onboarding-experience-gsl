@@ -904,12 +904,12 @@ Option B — Graph API (read `agentIdentityClientId` from `a365.generated.config
 
 ```bash
 # Create a temp JSON body file (required on Windows due to az rest escaping)
-echo '{"principalId":"<agentIdentitySPObjectId>","resourceId":"2a275186-1775-4439-8551-5438df22cdfc","appRoleId":"8f71190c-00c8-461d-a63b-f74abde9ba52"}' > body.json
+echo '{"principalId":"<agentIdentitySPObjectId>","resourceId":"<OBSERVABILITY_SP_OBJECT_ID>","appRoleId":"8f71190c-00c8-461d-a63b-f74abde9ba52"}' > body.json
 az rest --method POST --url "https://graph.microsoft.com/v1.0/servicePrincipals/<agentIdentitySPObjectId>/appRoleAssignments" --body @body.json
 rm body.json
 ```
 
-- `resourceId` `2a275186-...` is the Observability API SP object ID
+- `resourceId` `<OBSERVABILITY_SP_OBJECT_ID>` is the `Agent365Observability` service principal object ID in your own tenant; look it up with `az rest --method GET --uri "https://graph.microsoft.com/v1.0/servicePrincipals?$filter=displayName eq 'Agent365Observability'" --query "value[0].id" --output tsv` ([Grant Agent 365 observability permissions](https://learn.microsoft.com/azure/foundry/agents/how-to/grant-agent-365-permissions#identify-the-required-ids)).
 - `appRoleId` `8f71190c-...` is the OtelWrite role ID
 - For agents provisioned before CLI 1.1, this manual step is still required
 
