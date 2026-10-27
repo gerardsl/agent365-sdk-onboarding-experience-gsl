@@ -1619,8 +1619,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 27518,
-      "sha256": "7f77150458b40da784b72f32e6e49ee61e920fae5b0bc54b6a31dac6fe2958f9"
+      "bytes": 27588,
+      "sha256": "c066c9bf65b72f5102d232a165bf3c57f25b67da11e0cd886881b92701eb2053"
     },
     {
       "path": "GUIDE.md",
@@ -1644,8 +1644,8 @@
     },
     {
       "path": "LICENSE",
-      "bytes": 1081,
-      "sha256": "74a4569a078fedc9dae5169c26dfaaccef8d703cd1f3c5cd7f4232ffcd54afd0"
+      "bytes": 1134,
+      "sha256": "441d1113c7b1b45b153db38356823c1c96f32278dd844530bee0e471bd8e050c"
     },
     {
       "path": ".gitattributes",

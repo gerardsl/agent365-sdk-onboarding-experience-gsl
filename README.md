@@ -401,6 +401,6 @@ Before declaring an agent done: confirm the tenant, blueprint and identity ids f
 
 ## Licence
 
-Copyright © 2026 Akram Eleyan ([@AkramMSFT](https://github.com/AkramMSFT)). The kit is released under the MIT licence; see [`LICENSE`](LICENSE).
+Copyright © 2026 Akram Eleyan ([@AkramMSFT](https://github.com/AkramMSFT)) and Gerard Salvador López ([@gerardsl](https://github.com/gerardsl)). The kit is released under the MIT licence; see [`LICENSE`](LICENSE).
 
 The bundled skills are © Microsoft Corporation, also under the MIT licence. [`NOTICE.md`](NOTICE.md) carries their attribution and the full list of modifications. Every kit carries both licences and the notice inside `.a365-kit/`.
